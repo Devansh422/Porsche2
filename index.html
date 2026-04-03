@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Porsche 3D Showcase</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- BOTTOM LAYER: Scrollable Sections -->
+    <div id="scroll-container">
+        <!-- TOP LAYER: Fixed 3D Scene (GLB Model) -->
+        <div id="three-container" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: auto; z-index: 10;">
+            <div id="three-content"></div>
+        </div>
+        <div id="sections">
+            <!-- 9 sections of 100vh each -->
+            <section class="section" id="section1">Section 1 - Front View</section>
+            <section class="section" id="section2">Section 2 - Right Front</section>
+            <section class="section" id="section3">Section 3 - Side View</section>
+            <section class="section" id="section4">Section 4 - Right Side</section>
+            <section class="section" id="section5">Section 5 - Rear Right</section>
+            <section class="section" id="section6">Section 6 - Rear View</section>
+            <section class="section" id="section7">Section 7 - Rear Left</section>
+            <section class="section" id="section8">Section 8 - Left Rear</section>
+            <section class="section" id="section9">Section 9 - Left Side</section>
+        </div>
+    </div>
+
+    <!-- Debug Info (always on top) -->
+    <div id="debug-info" style="position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
+        <div>Position: <span id="position">0, 0, 0</span></div>
+        <div>Rotation: <span id="rotation">0, 0, 0</span></div>
+        <div>Model Section: <span id="model-section">1 / 9</span></div>
+        <div>Pivot Offset: <span id="pivot-offset">0, 0, 0</span></div>
+        <div>Pivot Section: <span id="pivot-section">1 / 9</span></div>
+        <div>Pivot Step: <span id="pivot-step">0.10</span></div>
+        <div>Keys: <span id="pivot-keys">Arrows X/Z, PgUp/PgDn Y, [/] step, 0 reset, H axes, Shift+Drag move, Alt+Drag rotate</span></div>
+    </div>
+
+    <!-- CDN Scripts as per user specification -->
+    <script src="https://unpkg.com/splitting/dist/splitting.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.29/bundled/lenis.min.js"></script>
+
+    <!-- Import Map for Three.js -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+                const scrollContainer = document.getElementById('scroll-container');
+                const sectionsRoot = document.getElementById('sections');
+                const sections = Array.from(document.querySelectorAll('.section'));
+
+                // Initialize Lenis Smooth Scroll (as per user specification)
+                const lenis = new Lenis({
+                    wrapper: scrollContainer,
+                    content: sectionsRoot,
+                    duration: 1.2,
+                    easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+                    direction: "vertical",
+                    gestureDirection: "vertical",
+                    smooth: true,
+                    mouseMultiplier: 1,
+                    smoothTouch: false,
+                    touchMultiplier: 2,
+                    infinite: false,
+                });
+
+        lenis.on("scroll", ScrollTrigger.update);
+        gsap.ticker.add((time) => lenis.raf(time * 1000));
+        gsap.ticker.lagSmoothing(0);
+
+        // Register GSAP plugins
+        gsap.registerPlugin(ScrollTrigger);
+        ScrollTrigger.defaults({ scroller: scrollContainer });
+
+        // Import Three.js modules via import map
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Three.js setup
+        let scene, camera, renderer, model, modelRig, modelPivot, controls, pivotHelper;
+        let modelScrollTimeline = null;
+        let dragControlsReady = false;
+        let isTranslateDrag = false;
+        let isRotateDrag = false;
+        const threeContainer = document.getElementById('three-content');
+        const modelBasePosition = new THREE.Vector3();
+        const defaultPivotOffset = new THREE.Vector3(0, 0, 0);
+        const pivotOffset = defaultPivotOffset.clone();
+        const pivotWorldPosition = new THREE.Vector3();
+        const dragRaycaster = new THREE.Raycaster();
+        const dragPointer = new THREE.Vector2();
+        const dragPlane = new THREE.Plane();
+        const dragIntersection = new THREE.Vector3();
+        const dragOffset = new THREE.Vector3();
+        let dragLastX = 0;
+        let activeSectionIndex = 0;
+        const smoothPivotEnabled = true;
+        let pivotStep = 0.1;
+        let pivotControlsReady = false;
+
+        initThreeJS();
+        animate();
+
+        function initThreeJS() {
+            // Scene
+            scene = new THREE.Scene();
+
+            pivotHelper = new THREE.AxesHelper(2);
+            scene.add(pivotHelper);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1, 3);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.setClearColor(0x000000, 0);
+            renderer.domElement.style.pointerEvents = 'auto';
+            renderer.domElement.style.cursor = 'grab';
+            threeContainer.appendChild(renderer.domElement);
+
+            // Loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.style.position = 'fixed';
+            loadingDiv.style.top = '50%';
+            loadingDiv.style.left = '50%';
+            loadingDiv.style.transform = 'translate(-50%, -50%)';
+            loadingDiv.style.background = 'rgba(0,0,0,0.8)';
+            loadingDiv.style.color = 'white';
+            loadingDiv.style.padding = '20px';
+            loadingDiv.style.borderRadius = '10px';
+            loadingDiv.style.fontFamily = 'monospace';
+            loadingDiv.style.zIndex = '1000';
+            loadingDiv.textContent = 'Loading Porsche model...';
+            document.body.appendChild(loadingDiv);
+
+            // Lighting with HDR
+            new RGBELoader()
+                .setPath('assets/')
+                .load('neutral.hdr', function (texture) {
+                    texture.mapping = THREE.EquirectangularReflectionMapping;
+                    scene.environment = texture;
+                }, undefined, function (error) {
+                    console.error('Error loading HDR:', error);
+                });
+
+            // Load GLB model - GLTFLoader works with both .gltf and .glb files
+            const loader = new GLTFLoader();
+            loader.load(
+                'assets/porsche.glb', // This is a .glb file, GLTFLoader handles it correctly
+                function (gltf) {
+                    model = gltf.scene;
+                    modelRig = new THREE.Group();
+                    modelPivot = new THREE.Group();
+                    scene.add(modelRig);
+                    modelRig.add(modelPivot);
+                    modelPivot.add(model);
+
+                    // Center the model
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    model.position.sub(center);
+                    modelBasePosition.copy(model.position);
+
+                    applyPivotOffsetFromKeyframe(0);
+
+                    // Add orbit controls for cursor interaction (but disable scrolling interference)
+                    controls = new OrbitControls(camera, renderer.domElement);
+                    controls.enableDamping = true;
+                    controls.dampingFactor = 0.1;
+                    controls.rotateSpeed = 0.6;
+                    // Important: Disable orbit controls from interfering with scroll
+                    controls.enablePan = false;
+                    controls.enableZoom = false;
+                    // Allow rotation but make it not interfere with page scroll
+                    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+
+                    modelPivot.getWorldPosition(pivotWorldPosition);
+                    controls.target.copy(pivotWorldPosition);
+                    if (pivotHelper) {
+                        pivotHelper.position.copy(pivotWorldPosition);
+                    }
+                    controls.update();
+
+                    renderer.domElement.addEventListener('pointerdown', () => {
+                        renderer.domElement.style.cursor = 'grabbing';
+                    });
+                    renderer.domElement.addEventListener('pointerup', () => {
+                        renderer.domElement.style.cursor = 'grab';
+                    });
+                    renderer.domElement.addEventListener('pointerleave', () => {
+                        renderer.domElement.style.cursor = 'grab';
+                    });
+
+                    setupPivotDebugControls();
+                    setupModelDragControls();
+                    setupModelScrollAnimations(sections, modelRig, modelPivot);
+                    ScrollTrigger.refresh();
+
+                    // Remove loading indicator
+                    document.body.removeChild(loadingDiv);
+                    console.log('Porsche GLB model loaded successfully!');
+                },
+                function (xhr) {
+                    // Loading progress
+                    loadingDiv.textContent = `Loading Porsche model... ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`;
+                },
+                function (error) {
+                    console.error('Error loading GLB model:', error);
+                    loadingDiv.textContent = 'Error loading model. Check console for details.';
+                    loadingDiv.style.background = 'rgba(139,0,0,0.8)';
+                }
+            );
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            // Add directional light
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (controls) {
+                if (modelPivot) {
+                    modelPivot.getWorldPosition(pivotWorldPosition);
+                    controls.target.copy(pivotWorldPosition);
+                    if (pivotHelper) {
+                        pivotHelper.position.copy(pivotWorldPosition);
+                    }
+                }
+
+                controls.update();
+            }
+
+            if (!isTranslateDrag && !isRotateDrag) {
+                syncPivotOffsetToSection();
+            }
+
+            // Update debug info
+            if (modelRig || modelPivot || model) {
+                const posTarget = modelRig || modelPivot || model;
+                const rotTarget = modelPivot || model;
+                const pos = posTarget.position;
+                const rot = rotTarget.rotation;
+                document.getElementById('position').textContent =
+                    `${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}`;
+                document.getElementById('rotation').textContent =
+                    `${rot.x.toFixed(2)}, ${rot.y.toFixed(2)}, ${rot.z.toFixed(2)}`;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        setupSectionAnimations(sections);
+
+        // Hardcoded model keyframes per section.
+        // Format: [posX, posY, posZ, rotX, rotY, rotZ]
+        const modelKeyframes = [
+            [17, 0, -10, 0, 0, 0],
+            [15, 0, 7, 0, -0.5, 0],
+            [15, 0, 0, 0, -1, 0],
+            [15, -40, 2, 0, -1.5, 0],
+            [15, 0, 0, 0, -2, 0],
+            [15, 0, 0, 0, -2.5, 0],
+            [15, 0, 0, 0, -3, 0],
+            [15, 0, 0, 0, -3.5, 0],
+            [15, 0, 0, 0, -4, 0]
+        ];
+
+        // Per-section pivot offsets.
+        // Format: [offsetX, offsetY, offsetZ]
+        // Edit these values manually per section.
+        const pivotKeyframes = [
+            [2, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0]
+        ];
+
+        function setupSectionAnimations(sectionNodes) {
+            sectionNodes.forEach((section) => {
+                gsap.from(section, {
+                    scrollTrigger: {
+                        trigger: section,
+                        start: 'top center',
+                        end: 'bottom center',
+                        scrub: 0.6,
+                        markers: false
+                    },
+                    opacity: 0.3,
+                    scale: 0.9,
+                    ease: 'power2.out'
+                });
+            });
+        }
+
+        function updateDragPointer(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            dragPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            dragPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        }
+
+        function getCurrentSectionIndex() {
+            const sectionHeight = window.innerHeight || 1;
+            const scrollTop = scrollContainer.scrollTop || 0;
+            const rawIndex = Math.round(scrollTop / sectionHeight);
+            return Math.min(sections.length - 1, Math.max(0, rawIndex));
+        }
+
+        function applyRigPositionToKeyframe(index) {
+            if (!modelRig || !modelKeyframes[index]) {
+                return;
+            }
+
+            const pos = modelRig.position;
+            modelKeyframes[index][0] = parseFloat(pos.x.toFixed(2));
+            modelKeyframes[index][1] = parseFloat(pos.y.toFixed(2));
+            modelKeyframes[index][2] = parseFloat(pos.z.toFixed(2));
+        }
+
+        function applyRigRotationToKeyframe(index) {
+            if (!modelPivot || !modelKeyframes[index]) {
+                return;
+            }
+
+            const rot = modelPivot.rotation;
+            modelKeyframes[index][3] = parseFloat(rot.x.toFixed(2));
+            modelKeyframes[index][4] = parseFloat(rot.y.toFixed(2));
+            modelKeyframes[index][5] = parseFloat(rot.z.toFixed(2));
+        }
+
+        function applyRigTransformToKeyframe(index) {
+            applyRigPositionToKeyframe(index);
+            applyRigRotationToKeyframe(index);
+        }
+
+        function applyPivotOffset() {
+            if (!model) {
+                return;
+            }
+
+            model.position.copy(modelBasePosition).sub(pivotOffset);
+            updatePivotDebugInfo();
+        }
+
+        function getPivotKeyframe(index) {
+            const keyframe = pivotKeyframes[index];
+
+            if (Array.isArray(keyframe) && keyframe.length >= 3) {
+                return keyframe;
+            }
+
+            return [
+                defaultPivotOffset.x,
+                defaultPivotOffset.y,
+                defaultPivotOffset.z
+            ];
+        }
+
+        function applyPivotOffsetFromKeyframe(index) {
+            const keyframe = getPivotKeyframe(index);
+            pivotOffset.set(keyframe[0], keyframe[1], keyframe[2]);
+            applyPivotOffset();
+        }
+
+        function applyPivotOffsetToKeyframe(index) {
+            if (!pivotKeyframes[index]) {
+                pivotKeyframes[index] = [
+                    defaultPivotOffset.x,
+                    defaultPivotOffset.y,
+                    defaultPivotOffset.z
+                ];
+            }
+
+            pivotKeyframes[index][0] = parseFloat(pivotOffset.x.toFixed(2));
+            pivotKeyframes[index][1] = parseFloat(pivotOffset.y.toFixed(2));
+            pivotKeyframes[index][2] = parseFloat(pivotOffset.z.toFixed(2));
+        }
+
+        function syncPivotOffsetToSection() {
+            const sectionIndex = getCurrentSectionIndex();
+
+            if (sectionIndex === activeSectionIndex) {
+                return;
+            }
+
+            activeSectionIndex = sectionIndex;
+            if (!smoothPivotEnabled) {
+                applyPivotOffsetFromKeyframe(activeSectionIndex);
+            } else {
+                updatePivotDebugInfo();
+            }
+        }
+
+        function updatePivotDebugInfo() {
+            const pivotOffsetEl = document.getElementById('pivot-offset');
+            const pivotSectionEl = document.getElementById('pivot-section');
+            const pivotStepEl = document.getElementById('pivot-step');
+            const modelSectionEl = document.getElementById('model-section');
+
+            if (pivotOffsetEl) {
+                pivotOffsetEl.textContent =
+                    `${pivotOffset.x.toFixed(2)}, ${pivotOffset.y.toFixed(2)}, ${pivotOffset.z.toFixed(2)}`;
+            }
+
+            if (pivotSectionEl) {
+                pivotSectionEl.textContent = `${activeSectionIndex + 1} / ${sections.length}`;
+            }
+
+            if (modelSectionEl) {
+                modelSectionEl.textContent = `${activeSectionIndex + 1} / ${sections.length}`;
+            }
+
+            if (pivotStepEl) {
+                pivotStepEl.textContent = pivotStep.toFixed(2);
+            }
+        }
+
+        function setupPivotDebugControls() {
+            if (pivotControlsReady) {
+                return;
+            }
+
+            pivotControlsReady = true;
+            updatePivotDebugInfo();
+
+            window.addEventListener('keydown', (event) => {
+                if (!model) {
+                    return;
+                }
+
+                const targetTag = event.target && event.target.tagName;
+                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') {
+                    return;
+                }
+
+                const step = event.shiftKey ? pivotStep * 5 : pivotStep;
+                let handled = true;
+                let pivotChanged = false;
+
+                switch (event.key) {
+                    case 'ArrowLeft':
+                        pivotOffset.x -= step;
+                        pivotChanged = true;
+                        break;
+                    case 'ArrowRight':
+                        pivotOffset.x += step;
+                        pivotChanged = true;
+                        break;
+                    case 'ArrowUp':
+                        pivotOffset.z -= step;
+                        pivotChanged = true;
+                        break;
+                    case 'ArrowDown':
+                        pivotOffset.z += step;
+                        pivotChanged = true;
+                        break;
+                    case 'PageUp':
+                        pivotOffset.y += step;
+                        pivotChanged = true;
+                        break;
+                    case 'PageDown':
+                        pivotOffset.y -= step;
+                        pivotChanged = true;
+                        break;
+                    case '[':
+                        pivotStep = Math.max(0.01, pivotStep - 0.01);
+                        break;
+                    case ']':
+                        pivotStep = Math.min(5, pivotStep + 0.01);
+                        break;
+                    case '0':
+                        pivotOffset.copy(defaultPivotOffset);
+                        pivotChanged = true;
+                        break;
+                    case 'h':
+                    case 'H':
+                        if (pivotHelper) {
+                            pivotHelper.visible = !pivotHelper.visible;
+                        }
+                        break;
+                    default:
+                        handled = false;
+                }
+
+                if (!handled) {
+                    return;
+                }
+
+                event.preventDefault();
+                if (pivotChanged) {
+                    activeSectionIndex = getCurrentSectionIndex();
+                    applyPivotOffset();
+                    applyPivotOffsetToKeyframe(activeSectionIndex);
+                    if (modelRig && modelPivot) {
+                        setupModelScrollAnimations(sections, modelRig, modelPivot);
+                        ScrollTrigger.refresh();
+                    }
+                }
+            });
+        }
+
+        function setupModelDragControls() {
+            if (dragControlsReady || !renderer) {
+                return;
+            }
+
+            dragControlsReady = true;
+
+            const handlePointerDown = (event) => {
+                if (!modelRig || !modelPivot || !camera) {
+                    return;
+                }
+
+                if (event.shiftKey) {
+                    isTranslateDrag = true;
+                    isRotateDrag = false;
+                } else if (event.altKey) {
+                    isRotateDrag = true;
+                    isTranslateDrag = false;
+                } else {
+                    return;
+                }
+
+                activeSectionIndex = getCurrentSectionIndex();
+                updatePivotDebugInfo();
+
+                if (controls) {
+                    controls.enabled = false;
+                }
+                if (modelScrollTimeline && modelScrollTimeline.scrollTrigger) {
+                    modelScrollTimeline.scrollTrigger.disable();
+                }
+
+                renderer.domElement.style.cursor = 'move';
+                renderer.domElement.setPointerCapture(event.pointerId);
+
+                if (isTranslateDrag) {
+                    dragPlane.set(new THREE.Vector3(0, 1, 0), -modelRig.position.y);
+                    updateDragPointer(event);
+                    dragRaycaster.setFromCamera(dragPointer, camera);
+
+                    if (dragRaycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                        dragOffset.copy(modelRig.position).sub(dragIntersection);
+                    }
+                }
+
+                if (isRotateDrag) {
+                    dragLastX = event.clientX;
+                }
+            };
+
+            const handlePointerMove = (event) => {
+                if (isTranslateDrag && modelRig && camera) {
+                    updateDragPointer(event);
+                    dragRaycaster.setFromCamera(dragPointer, camera);
+
+                    if (dragRaycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                        modelRig.position.copy(dragIntersection).add(dragOffset);
+                    }
+                }
+
+                if (isRotateDrag && modelPivot) {
+                    const deltaX = event.clientX - dragLastX;
+                    dragLastX = event.clientX;
+                    modelPivot.rotation.y += deltaX * 0.005;
+                }
+            };
+
+            const handlePointerUp = (event) => {
+                if (!isTranslateDrag && !isRotateDrag) {
+                    return;
+                }
+
+                isTranslateDrag = false;
+                isRotateDrag = false;
+                renderer.domElement.style.cursor = 'grab';
+                renderer.domElement.releasePointerCapture(event.pointerId);
+
+                if (controls) {
+                    controls.enabled = true;
+                }
+
+                applyRigTransformToKeyframe(getCurrentSectionIndex());
+                setupModelScrollAnimations(sections, modelRig, modelPivot);
+                ScrollTrigger.refresh();
+            };
+
+            renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+            renderer.domElement.addEventListener('pointermove', handlePointerMove);
+            renderer.domElement.addEventListener('pointerup', handlePointerUp);
+            renderer.domElement.addEventListener('pointerleave', handlePointerUp);
+        }
+
+        function setupModelScrollAnimations(sectionNodes, rig, pivot) {
+            if (!rig || !pivot) {
+                return;
+            }
+
+            if (modelScrollTimeline) {
+                if (modelScrollTimeline.scrollTrigger) {
+                    modelScrollTimeline.scrollTrigger.kill();
+                }
+                modelScrollTimeline.kill();
+                modelScrollTimeline = null;
+            }
+
+            const frameCount = Math.min(modelKeyframes.length, sectionNodes.length);
+
+            if (frameCount === 0) {
+                return;
+            }
+
+            const [startPosX, startPosY, startPosZ, startRotX, startRotY, startRotZ] = modelKeyframes[0];
+            rig.position.set(startPosX, startPosY, startPosZ);
+            pivot.rotation.set(startRotX, startRotY, startRotZ);
+            const [startPivotX, startPivotY, startPivotZ] = getPivotKeyframe(0);
+            pivotOffset.set(startPivotX, startPivotY, startPivotZ);
+            applyPivotOffset();
+
+            if (frameCount === 1) {
+                return;
+            }
+
+            const timeline = gsap.timeline({
+                defaults: { ease: 'none' },
+                scrollTrigger: {
+                    trigger: sectionsRoot,
+                    start: 'top top',
+                    end: 'bottom bottom',
+                    scrub: 0.8
+                }
+            });
+
+            for (let i = 1; i < frameCount; i += 1) {
+                const [posX, posY, posZ, rotX, rotY, rotZ] = modelKeyframes[i];
+                const [pivotX, pivotY, pivotZ] = getPivotKeyframe(i);
+                const segmentIndex = i - 1;
+
+                timeline.to(rig.position, {
+                    x: posX,
+                    y: posY,
+                    z: posZ,
+                    duration: 1
+                }, segmentIndex);
+
+                timeline.to(pivot.rotation, {
+                    x: rotX,
+                    y: rotY,
+                    z: rotZ,
+                    duration: 1
+                }, segmentIndex);
+
+                timeline.to(pivotOffset, {
+                    x: pivotX,
+                    y: pivotY,
+                    z: pivotZ,
+                    duration: 1,
+                    onUpdate: applyPivotOffset
+                }, segmentIndex);
+            }
+
+            modelScrollTimeline = timeline;
+        }
+
+    </script>
+</body>
+</html>
