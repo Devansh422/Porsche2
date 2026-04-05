@@ -15,12 +15,12 @@
         </div>
         <div id="sections">
             <!-- Variable-height sections -->
-            <section class="section" style="height: 200vh;" id="section1"></section>
+            <section class="section" style="height: 100vh;" id="section1"></section>
         </div>
     </div>
 
     <!-- Debug Info (always on top) -->
-    <div id="debug-info" style="display: none; position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
+    <div id="debug-info" style=" display: none; position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
         <div>Section: <span id="model-section">1 / 1</span></div>
         <div>Position: X <input id="pos-x" type="number" step="0.01" style="width:72px;"> Y <input id="pos-y" type="number" step="0.01" style="width:72px;"> Z <input id="pos-z" type="number" step="0.01" style="width:72px;"></div>
         <div>Rotation: X <input id="rot-x" type="number" step="0.01" style="width:72px;"> Y <input id="rot-y" type="number" step="0.01" style="width:72px;"> Z <input id="rot-z" type="number" step="0.01" style="width:72px;"></div>
@@ -28,7 +28,9 @@
         <div>Light: X <input id="light-x" type="number" step="0.01" style="width:72px;"> Y <input id="light-y" type="number" step="0.01" style="width:72px;"> Z <input id="light-z" type="number" step="0.01" style="width:72px;"></div>
         <div>Neon: <select id="neon-target" style="width:64px;"></select> X <input id="neon-x" type="number" step="0.01" style="width:62px;"> Y <input id="neon-y" type="number" step="0.01" style="width:62px;"> Z <input id="neon-z" type="number" step="0.01" style="width:62px;"></div>
         <div>Neon Params: I <input id="neon-intensity" type="number" step="0.1" style="width:62px;"> D <input id="neon-distance" type="number" step="0.1" style="width:62px;"> E <input id="neon-emissive" type="number" step="0.1" style="width:62px;"> A <input id="neon-amp" type="number" step="0.1" style="width:62px;"> S <input id="neon-speed" type="number" step="0.1" style="width:62px;"> P <input id="neon-phase" type="number" step="0.1" style="width:62px;"> Rx <input id="neon-rx" type="number" step="0.01" style="width:62px;"> Ry <input id="neon-ry" type="number" step="0.01" style="width:62px;"> Rz <input id="neon-rz" type="number" step="0.01" style="width:62px;"></div>
+        <div>Points: <select id="point-target" style="width:72px;"></select> X <input id="point-x" type="number" step="0.01" style="width:62px;"> Y <input id="point-y" type="number" step="0.01" style="width:62px;"> Z <input id="point-z" type="number" step="0.01" style="width:62px;"></div>
         <div>Tip: Shift + Drag moves position, Alt + Drag rotates, and Left/Right arrows steer front wheels.</div>
+        <div>Debug Panel: Press H to show/hide</div>
         <div>Wheel Controls: T toggle, R faster, F slower, G stop</div>
         <div>Door Controls: 1 left, 2 right, 3 all, 0 close, 4 flip direction, 5 manual door</div>
         <div id="door-debug">Doors: analyzing...</div>
@@ -95,6 +97,19 @@
         const neonFlickerLights = [];
         const neonPointEntries = [];
         const tubeFixtureEntries = [];
+        const detailHotspots = [];
+        const detailHotspotRaycaster = new THREE.Raycaster();
+        const detailHotspotPointer = new THREE.Vector2();
+        const detailHotspotWorldPosition = new THREE.Vector3();
+        const detailHotspotScreenPosition = new THREE.Vector3();
+        let detailHotspotOverlay = null;
+        let detailHotspotTitleEl = null;
+        let detailHotspotBodyEl = null;
+        let activeDetailHotspot = null;
+        let detailHotspotInteractionReady = false;
+        let detailHotspotsReady = false;
+        let detailHotspotDebuggerReady = false;
+        let activeDetailHotspotTargetId = 'wheel';
         let neonDebuggerReady = false;
         let activeNeonTargetId = 'P1';
         const neonPointConfigs = [
@@ -285,6 +300,9 @@
         const maxScrollDeltaPerFrame = 180;
         let scrollWheelSpinIntensity = 0.5;
         let scrollWheelSmoothDuration = 0.18;
+        const wheelGestureDeltaClamp = 120;
+        const wheelGestureSpinIntensity = 0.2;
+        let pendingWheelGestureRotation = 0;
         let smoothedScrollWheelDelta = 0;
         let lastScrollTop = scrollContainer.scrollTop || 0;
         const defaultAmbientLightColor = [0.04, 0.04, 0.16];
@@ -316,6 +334,7 @@
         const enableModelAnalysisLogs = false;
         const enableDoorAnalysisLogs = false;
 
+        setupDebugPanelToggle();
         initThreeJS();
         updateCaliperDebugInfo();
         animate();
@@ -537,6 +556,8 @@
                     setupModelScrollAnimations(sections, modelRig, modelPivot);
                     setupCyberpunkNeonRig(modelRig);
                     setupNeonDebuggerControls();
+                    setupCarDetailHotspots(model);
+                    setupDetailHotspotDebuggerControls();
                     applyHardcodedManualDoorPivotWorldPoints();
                     alignGarageToCar();
                     requestShadowUpdate();
@@ -662,6 +683,7 @@
             }
 
             updateCyberpunkNeonRig(animationClock.elapsedTime);
+            updateActiveDetailHotspotOverlay();
 
             if (composer) {
                 composer.render();
@@ -1395,6 +1417,476 @@
             bindLiveInput(inputRotationZ);
 
             updateNeonDebuggerInputs();
+        }
+
+        function getDetailHotspotById(hotspotId) {
+            return detailHotspots.find((entry) => entry.id === hotspotId) || null;
+        }
+
+        function updateDetailHotspotDebuggerInputs() {
+            const targetSelect = document.getElementById('point-target');
+            const inputX = document.getElementById('point-x');
+            const inputY = document.getElementById('point-y');
+            const inputZ = document.getElementById('point-z');
+
+            if (!targetSelect || !inputX || !inputY || !inputZ) {
+                return;
+            }
+
+            if (!detailHotspots.length) {
+                targetSelect.innerHTML = '';
+                return;
+            }
+
+            const needsOptionRefresh = targetSelect.options.length !== detailHotspots.length
+                || detailHotspots.some((entry, index) => {
+                    const option = targetSelect.options[index];
+                    return !option || option.value !== entry.id;
+                });
+
+            if (needsOptionRefresh) {
+                targetSelect.innerHTML = '';
+                for (const entry of detailHotspots) {
+                    const option = document.createElement('option');
+                    option.value = entry.id;
+                    option.textContent = entry.id;
+                    targetSelect.appendChild(option);
+                }
+            }
+
+            if (!getDetailHotspotById(activeDetailHotspotTargetId)) {
+                activeDetailHotspotTargetId = detailHotspots[0].id;
+            }
+
+            if (targetSelect.value !== activeDetailHotspotTargetId) {
+                targetSelect.value = activeDetailHotspotTargetId;
+            }
+
+            const activeHotspot = getDetailHotspotById(activeDetailHotspotTargetId);
+            if (!activeHotspot || !activeHotspot.mesh) {
+                return;
+            }
+
+            const setIfIdle = (input, value, digits = 2) => {
+                if (document.activeElement === input) {
+                    return;
+                }
+                input.value = Number(value).toFixed(digits);
+            };
+
+            setIfIdle(inputX, activeHotspot.mesh.position.x, 2);
+            setIfIdle(inputY, activeHotspot.mesh.position.y, 2);
+            setIfIdle(inputZ, activeHotspot.mesh.position.z, 2);
+        }
+
+        function setupDetailHotspotDebuggerControls() {
+            if (detailHotspotDebuggerReady) {
+                return;
+            }
+
+            const targetSelect = document.getElementById('point-target');
+            const inputX = document.getElementById('point-x');
+            const inputY = document.getElementById('point-y');
+            const inputZ = document.getElementById('point-z');
+
+            if (!targetSelect || !inputX || !inputY || !inputZ) {
+                return;
+            }
+
+            detailHotspotDebuggerReady = true;
+
+            const applyInputsToActiveHotspot = () => {
+                const activeHotspot = getDetailHotspotById(activeDetailHotspotTargetId);
+                if (!activeHotspot || !activeHotspot.mesh) {
+                    return;
+                }
+
+                const parseOrCurrent = (input, currentValue) => {
+                    const parsed = parseFloat(input.value);
+                    if (!Number.isFinite(parsed)) {
+                        return currentValue;
+                    }
+                    return parsed;
+                };
+
+                activeHotspot.mesh.position.set(
+                    parseOrCurrent(inputX, activeHotspot.mesh.position.x),
+                    parseOrCurrent(inputY, activeHotspot.mesh.position.y),
+                    parseOrCurrent(inputZ, activeHotspot.mesh.position.z)
+                );
+
+                requestShadowUpdate();
+                updateActiveDetailHotspotOverlay();
+            };
+
+            targetSelect.addEventListener('change', () => {
+                activeDetailHotspotTargetId = targetSelect.value;
+                updateDetailHotspotDebuggerInputs();
+            });
+
+            const bindLiveInput = (input) => {
+                input.addEventListener('input', applyInputsToActiveHotspot);
+                input.addEventListener('change', applyInputsToActiveHotspot);
+            };
+
+            bindLiveInput(inputX);
+            bindLiveInput(inputY);
+            bindLiveInput(inputZ);
+
+            updateDetailHotspotDebuggerInputs();
+        }
+
+        function setupDebugPanelToggle() {
+            const debugPanel = document.getElementById('debug-info');
+            if (!debugPanel) {
+                return;
+            }
+
+            window.addEventListener('keydown', (event) => {
+                const targetTag = event.target && event.target.tagName;
+                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
+                    return;
+                }
+
+                if (event.key !== 'h' && event.key !== 'H') {
+                    return;
+                }
+
+                event.preventDefault();
+                debugPanel.style.display = debugPanel.style.display === 'none' ? 'block' : 'none';
+            });
+        }
+
+        function setupDetailHotspotOverlay() {
+            if (detailHotspotOverlay) {
+                return;
+            }
+
+            detailHotspotOverlay = document.createElement('div');
+            detailHotspotOverlay.style.position = 'fixed';
+            detailHotspotOverlay.style.zIndex = '1001';
+            detailHotspotOverlay.style.minWidth = '190px';
+            detailHotspotOverlay.style.maxWidth = '250px';
+            detailHotspotOverlay.style.padding = '10px 12px';
+            detailHotspotOverlay.style.borderRadius = '10px';
+            detailHotspotOverlay.style.background = 'rgba(0, 0, 0, 0.82)';
+            detailHotspotOverlay.style.border = '1px solid rgba(255, 255, 255, 0.45)';
+            detailHotspotOverlay.style.color = '#ffffff';
+            detailHotspotOverlay.style.fontFamily = 'monospace';
+            detailHotspotOverlay.style.fontSize = '12px';
+            detailHotspotOverlay.style.lineHeight = '1.35';
+            detailHotspotOverlay.style.pointerEvents = 'none';
+            detailHotspotOverlay.style.display = 'none';
+            detailHotspotOverlay.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.4)';
+
+            detailHotspotTitleEl = document.createElement('div');
+            detailHotspotTitleEl.style.fontSize = '13px';
+            detailHotspotTitleEl.style.fontWeight = '700';
+            detailHotspotTitleEl.style.marginBottom = '4px';
+            detailHotspotTitleEl.style.letterSpacing = '0.02em';
+
+            detailHotspotBodyEl = document.createElement('div');
+            detailHotspotBodyEl.style.opacity = '0.92';
+
+            detailHotspotOverlay.appendChild(detailHotspotTitleEl);
+            detailHotspotOverlay.appendChild(detailHotspotBodyEl);
+            document.body.appendChild(detailHotspotOverlay);
+        }
+
+        function showDetailHotspot(hotspot) {
+            if (!hotspot || !detailHotspotOverlay || !detailHotspotTitleEl || !detailHotspotBodyEl) {
+                return;
+            }
+
+            activeDetailHotspot = hotspot;
+            activeDetailHotspotTargetId = hotspot.id;
+            updateDetailHotspotDebuggerInputs();
+            detailHotspotTitleEl.textContent = hotspot.title;
+            detailHotspotBodyEl.textContent = hotspot.description;
+            detailHotspotOverlay.style.display = 'block';
+            updateActiveDetailHotspotOverlay();
+        }
+
+        function hideDetailHotspot() {
+            activeDetailHotspot = null;
+            if (detailHotspotOverlay) {
+                detailHotspotOverlay.style.display = 'none';
+            }
+        }
+
+        function updateActiveDetailHotspotOverlay() {
+            if (!activeDetailHotspot || !activeDetailHotspot.mesh || !detailHotspotOverlay || !camera) {
+                return;
+            }
+
+            activeDetailHotspot.mesh.getWorldPosition(detailHotspotWorldPosition);
+            detailHotspotScreenPosition.copy(detailHotspotWorldPosition).project(camera);
+
+            const isVisible = detailHotspotScreenPosition.z > -1 && detailHotspotScreenPosition.z < 1;
+            if (!isVisible) {
+                detailHotspotOverlay.style.display = 'none';
+                return;
+            }
+
+            const screenX = (detailHotspotScreenPosition.x * 0.5 + 0.5) * window.innerWidth;
+            const screenY = (-detailHotspotScreenPosition.y * 0.5 + 0.5) * window.innerHeight;
+            const margin = 12;
+            const maxLeft = Math.max(margin, window.innerWidth - 260);
+            const maxTop = Math.max(margin, window.innerHeight - 140);
+            const left = THREE.MathUtils.clamp(screenX + 16, margin, maxLeft);
+            const top = THREE.MathUtils.clamp(screenY - 18, margin, maxTop);
+
+            detailHotspotOverlay.style.left = `${Math.round(left)}px`;
+            detailHotspotOverlay.style.top = `${Math.round(top)}px`;
+            detailHotspotOverlay.style.display = 'block';
+        }
+
+        function setupDetailHotspotInteraction() {
+            if (detailHotspotInteractionReady || !renderer) {
+                return;
+            }
+
+            detailHotspotInteractionReady = true;
+
+            renderer.domElement.addEventListener('pointermove', (event) => {
+                if (!detailHotspots.length || !camera || isTranslateDrag || isRotateDrag || event.buttons !== 0) {
+                    return;
+                }
+
+                const rect = renderer.domElement.getBoundingClientRect();
+                detailHotspotPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                detailHotspotPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                detailHotspotRaycaster.setFromCamera(detailHotspotPointer, camera);
+
+                const markerMeshes = detailHotspots.flatMap((entry) => [
+                    entry.mesh,
+                    entry.glowMesh,
+                    entry.outerGlowMesh
+                ].filter(Boolean));
+                const intersections = detailHotspotRaycaster.intersectObjects(markerMeshes, false);
+                renderer.domElement.style.cursor = intersections.length ? 'pointer' : 'grab';
+            });
+
+            renderer.domElement.addEventListener('click', (event) => {
+                if (!detailHotspots.length || !camera || isTranslateDrag || isRotateDrag || event.shiftKey || event.altKey) {
+                    return;
+                }
+
+                const rect = renderer.domElement.getBoundingClientRect();
+                detailHotspotPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                detailHotspotPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                detailHotspotRaycaster.setFromCamera(detailHotspotPointer, camera);
+
+                const markerMeshes = detailHotspots.flatMap((entry) => [
+                    entry.mesh,
+                    entry.glowMesh,
+                    entry.outerGlowMesh
+                ].filter(Boolean));
+                const intersections = detailHotspotRaycaster.intersectObjects(markerMeshes, false);
+                if (!intersections.length) {
+                    hideDetailHotspot();
+                    return;
+                }
+
+                const hitMesh = intersections[0].object;
+                const hitHotspot = detailHotspots.find((entry) =>
+                    entry.mesh === hitMesh
+                    || entry.glowMesh === hitMesh
+                    || entry.outerGlowMesh === hitMesh
+                ) || null;
+                if (!hitHotspot) {
+                    hideDetailHotspot();
+                    return;
+                }
+
+                if (activeDetailHotspot && activeDetailHotspot.id === hitHotspot.id) {
+                    hideDetailHotspot();
+                    return;
+                }
+
+                showDetailHotspot(hitHotspot);
+            });
+
+            window.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    hideDetailHotspot();
+                }
+            });
+        }
+
+        function setupCarDetailHotspots(carRoot) {
+            if (detailHotspotsReady || !carRoot) {
+                return;
+            }
+
+            carRoot.updateMatrixWorld(true);
+            const carBounds = new THREE.Box3().setFromObject(carRoot);
+            if (!Number.isFinite(carBounds.min.x)) {
+                return;
+            }
+
+            setupDetailHotspotOverlay();
+            setupDetailHotspotInteraction();
+
+            const carSize = carBounds.getSize(new THREE.Vector3());
+
+            const hotspotSpecs = [
+                {
+                    id: 'wheel',
+                    title: 'Wheel',
+                    description: 'Wheel and tire assembly area. Click to inspect wheel detail.',
+                    localPosition: [-16.81, 1.4, -14.09]
+                },
+                {
+                    id: 'bonnet',
+                    title: 'Bonnet',
+                    description: 'Front bonnet section. Click to inspect front body detail.',
+                    localPosition: [-12.15, 4.12, -15.0]
+                },
+                {
+                    id: 'spoiler',
+                    title: 'Spoiler',
+                    description: 'Rear spoiler area. Click to inspect rear aerodynamic detail.',
+                    localPosition: [-12.39, 4.56, -0.42]
+                },
+                {
+                    id: 'door',
+                    title: 'Door',
+                    description: 'Side door panel region. Click to inspect door detail.',
+                    localPosition: [-8.28, 2.54, -9.22]
+                }
+            ];
+
+            const markerRadius = Math.max(0.01, Math.min(carSize.x, carSize.z) * 0.0026);
+            const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 12);
+            const glowGeometry = new THREE.SphereGeometry(markerRadius * 3.1, 20, 16);
+            const outerGlowGeometry = new THREE.SphereGeometry(markerRadius * 4.8, 24, 18);
+
+            for (let index = 0; index < hotspotSpecs.length; index += 1) {
+                const spec = hotspotSpecs[index];
+                const markerMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.96
+                });
+                const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+                marker.position.set(spec.localPosition[0], spec.localPosition[1], spec.localPosition[2]);
+                marker.renderOrder = 9000;
+                carRoot.add(marker);
+
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x8ffcff,
+                    transparent: true,
+                    opacity: 0.4,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
+                const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+                glowMesh.renderOrder = 8999;
+                glowMesh.scale.setScalar(1);
+                marker.add(glowMesh);
+
+                const outerGlowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xc8ffff,
+                    transparent: true,
+                    opacity: 0.16,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
+                const outerGlowMesh = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
+                outerGlowMesh.renderOrder = 8998;
+                outerGlowMesh.scale.setScalar(1);
+                marker.add(outerGlowMesh);
+
+                const flickerState = {
+                    coreOpacity: 0.96,
+                    glowOpacity: 0.4,
+                    outerGlowOpacity: 0.16,
+                    markerScale: 1,
+                    glowScale: 1,
+                    outerGlowScale: 1
+                };
+
+                const applyFlickerState = () => {
+                    markerMaterial.opacity = flickerState.coreOpacity;
+                    marker.scale.setScalar(flickerState.markerScale);
+                    glowMaterial.opacity = flickerState.glowOpacity;
+                    glowMesh.scale.setScalar(flickerState.glowScale);
+                    outerGlowMaterial.opacity = flickerState.outerGlowOpacity;
+                    outerGlowMesh.scale.setScalar(flickerState.outerGlowScale);
+                };
+
+                gsap.timeline({ repeat: -1, delay: index * 0.14 })
+                    .to(flickerState, {
+                        duration: 0.78,
+                        coreOpacity: 1.0,
+                        glowOpacity: 0.62,
+                        outerGlowOpacity: 0.28,
+                        markerScale: 1.08,
+                        glowScale: 1.42,
+                        outerGlowScale: 1.72,
+                        ease: 'sine.inOut',
+                        onUpdate: applyFlickerState
+                    })
+                    .to(flickerState, {
+                        duration: 0.64,
+                        coreOpacity: 0.78,
+                        glowOpacity: 0.24,
+                        outerGlowOpacity: 0.1,
+                        markerScale: 0.92,
+                        glowScale: 0.9,
+                        outerGlowScale: 0.82,
+                        ease: 'sine.inOut',
+                        onUpdate: applyFlickerState
+                    })
+                    .to(flickerState, {
+                        duration: 0.07,
+                        coreOpacity: 0.6,
+                        glowOpacity: 0.15,
+                        outerGlowOpacity: 0.06,
+                        markerScale: 0.84,
+                        glowScale: 0.74,
+                        outerGlowScale: 0.68,
+                        ease: 'power2.out',
+                        onUpdate: applyFlickerState
+                    })
+                    .to(flickerState, {
+                        duration: 0.1,
+                        coreOpacity: 0.98,
+                        glowOpacity: 0.68,
+                        outerGlowOpacity: 0.32,
+                        markerScale: 1.04,
+                        glowScale: 1.52,
+                        outerGlowScale: 1.84,
+                        ease: 'power2.in',
+                        onUpdate: applyFlickerState
+                    })
+                    .to(flickerState, {
+                        duration: 0.32,
+                        coreOpacity: 0.96,
+                        glowOpacity: 0.4,
+                        outerGlowOpacity: 0.16,
+                        markerScale: 1,
+                        glowScale: 1,
+                        outerGlowScale: 1,
+                        ease: 'sine.out',
+                        onUpdate: applyFlickerState
+                    });
+
+                applyFlickerState();
+
+                detailHotspots.push({
+                    id: spec.id,
+                    title: spec.title,
+                    description: spec.description,
+                    mesh: marker,
+                    glowMesh,
+                    outerGlowMesh
+                });
+            }
+
+            detailHotspotsReady = true;
+            updateDetailHotspotDebuggerInputs();
         }
 
         function applyPivotOffset() {
@@ -2710,6 +3202,13 @@
                 targetRotationDelta = clampedScrollDelta * scrollWheelSpinIntensity;
             }
 
+            // Fallback for short/no-scroll layouts: keep wheel rotation reactive to scroll gestures.
+            const gestureRotationDelta = pendingWheelGestureRotation;
+            pendingWheelGestureRotation = 0;
+            if (targetRotationDelta === 0 && gestureRotationDelta !== 0) {
+                targetRotationDelta = gestureRotationDelta;
+            }
+
             const safeDeltaTime = Math.max(1 / 240, deltaTime || 0);
             const safeDuration = Math.max(0.001, scrollWheelSmoothDuration);
             const blend = 1 - Math.exp(-safeDeltaTime / safeDuration);
@@ -2974,6 +3473,19 @@
             }
 
             wheelControlsReady = true;
+
+            scrollContainer.addEventListener('wheel', (event) => {
+                if (!wheelRigs.length) {
+                    return;
+                }
+
+                const clampedGestureDelta = THREE.MathUtils.clamp(
+                    event.deltaY,
+                    -wheelGestureDeltaClamp,
+                    wheelGestureDeltaClamp
+                );
+                pendingWheelGestureRotation += clampedGestureDelta * wheelGestureSpinIntensity;
+            }, { passive: true });
 
             window.addEventListener('keydown', (event) => {
                 const targetTag = event.target && event.target.tagName;
