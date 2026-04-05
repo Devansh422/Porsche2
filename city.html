@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>City 3D Scene</title>
+  <style>
+    :root {
+      --bg-top: #101820;
+      --bg-bottom: #1c2e3f;
+      --panel-bg: rgba(10, 16, 24, 0.65);
+      --panel-border: rgba(255, 255, 255, 0.18);
+      --text-main: #edf3f9;
+      --text-muted: #b9c8d7;
+      --accent: #7ee3ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+      color: var(--text-main);
+      background: radial-gradient(circle at 30% 20%, var(--bg-bottom), var(--bg-top) 60%);
+    }
+
+    #scene-root {
+      width: 100%;
+      height: 100%;
+    }
+
+    .hud {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 10;
+      max-width: min(92vw, 420px);
+      padding: 12px 14px;
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      background: var(--panel-bg);
+      backdrop-filter: blur(5px);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+    }
+
+    .hud h1 {
+      margin: 0 0 6px;
+      font-size: clamp(16px, 2.6vw, 22px);
+      font-weight: 650;
+      line-height: 1.2;
+      letter-spacing: 0.01em;
+    }
+
+    .hud p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .status {
+      margin-top: 9px;
+      font-size: 13px;
+      color: var(--accent);
+      word-break: break-word;
+    }
+
+    .analysis {
+      margin-top: 10px;
+      margin-bottom: 0;
+      max-height: min(40vh, 250px);
+      overflow: auto;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.32);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #d4e3f2;
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <h1>City Scene Viewer</h1>
+    <p>Model loaded: assets/city.glb. Use Arrow keys to walk on roads. Press O to toggle Orbit mode.</p>
+    <div id="status" class="status">Loading scene...</div>
+    <pre id="analysis" class="analysis">Analyzing city model...</pre>
+  </div>
+  <div id="scene-root"></div>
+
+  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+
+    const root = document.getElementById("scene-root");
+    const statusEl = document.getElementById("status");
+    const analysisEl = document.getElementById("analysis");
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0c151f);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+    camera.position.set(30, 24, 30);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    root.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.minDistance = 2;
+    controls.maxDistance = 300;
+
+    const clock = new THREE.Clock();
+    const downDirection = new THREE.Vector3(0, -1, 0);
+    const raycastOrigin = new THREE.Vector3();
+    const worldNormal = new THREE.Vector3();
+    const movementVector = new THREE.Vector3();
+    const forwardVector = new THREE.Vector3();
+    const lookDirection = new THREE.Vector3();
+    const lookTarget = new THREE.Vector3();
+    const cameraDirection = new THREE.Vector3();
+
+    const navigation = {
+      mode: "walk",
+      ready: false,
+      keys: new Set(),
+      position: new THREE.Vector3(),
+      lastRoadPosition: new THREE.Vector3(),
+      hasLastRoadPosition: false,
+      yaw: 0,
+      eyeHeight: 1.72,
+      moveSpeed: 16,
+      turnSpeed: THREE.MathUtils.degToRad(90),
+      maxStepHeight: 2.2,
+      minWalkNormalY: 0.35,
+      roadEdgeBuffer: 1.25,
+      strictRoadLock: true,
+      roadMeshes: [],
+      roadMeshSet: new Set(),
+      allMeshes: [],
+      cityBounds: null
+    };
+
+    const roadRaycaster = new THREE.Raycaster();
+    let currentModelAnalysis = null;
+
+    function isArrowKey(code) {
+      return code === "ArrowUp" || code === "ArrowDown" || code === "ArrowLeft" || code === "ArrowRight";
+    }
+
+    function formatShortName(name) {
+      if (!name) {
+        return "(unnamed)";
+      }
+      if (name.length <= 28) {
+        return name;
+      }
+      return `${name.slice(0, 25)}...`;
+    }
+
+    function analyzeCityModel(rootObject, cityBounds) {
+      const roadNamePattern = /(road|street|lane|asphalt|avenue|highway|driveway|junction|crossing|intersection)/i;
+      const sideAreaPattern = /(sidewalk|walkway|footpath|curb|parking|park|grass|tree|building|roof|wall|fence|house|terrain|plaza)/i;
+      const materialNames = new Set();
+      const meshRows = [];
+      let nodeCount = 0;
+      let meshCount = 0;
+      let triangleCount = 0;
+
+      rootObject.updateMatrixWorld(true);
+
+      rootObject.traverse((node) => {
+        nodeCount += 1;
+
+        if (!node.isMesh || !node.geometry) {
+          return;
+        }
+
+        meshCount += 1;
+
+        const geometry = node.geometry;
+        const triangleEstimate = geometry.index
+          ? geometry.index.count / 3
+          : (geometry.attributes.position ? geometry.attributes.position.count / 3 : 0);
+        triangleCount += triangleEstimate;
+
+        const material = node.material;
+        const materialList = Array.isArray(material) ? material : [material];
+        let materialLabel = "";
+        let colorLuma = 1;
+
+        materialList.forEach((mat) => {
+          if (!mat) {
+            return;
+          }
+          const matName = mat.name || mat.uuid || "material";
+          materialNames.add(matName);
+          materialLabel += `${matName} `;
+          if (mat.color) {
+            colorLuma = Math.min(
+              colorLuma,
+              mat.color.r * 0.2126 + mat.color.g * 0.7152 + mat.color.b * 0.0722
+            );
+          }
+        });
+
+        const bounds = new THREE.Box3().setFromObject(node);
+        if (!Number.isFinite(bounds.min.x)) {
+          return;
+        }
+
+        const size = bounds.getSize(new THREE.Vector3());
+        const horizontalSpan = Math.max(size.x, size.z);
+        const flatness = horizontalSpan > 0 ? size.y / horizontalSpan : 1;
+        const footprint = size.x * size.z;
+        const nearGround = Math.abs(bounds.min.y - cityBounds.min.y) <= 3.2;
+
+        const label = `${node.name || ""} ${materialLabel}`.toLowerCase();
+        const nameHitsRoad = roadNamePattern.test(label);
+        const nameHitsSideArea = sideAreaPattern.test(label);
+        const darkAsphaltLike = colorLuma < 0.52;
+
+        let roadScore = 0;
+        if (nameHitsRoad) {
+          roadScore += 4;
+        }
+        if (flatness < 0.09) {
+          roadScore += 2;
+        }
+        if (flatness < 0.03) {
+          roadScore += 1;
+        }
+        if (horizontalSpan > 8) {
+          roadScore += 1;
+        }
+        if (footprint > 80) {
+          roadScore += 1;
+        }
+        if (nearGround) {
+          roadScore += 1;
+        }
+        if (darkAsphaltLike) {
+          roadScore += 0.7;
+        }
+        if (nameHitsSideArea) {
+          roadScore -= 3;
+        }
+
+        meshRows.push({
+          node,
+          name: node.name || "(unnamed)",
+          material: materialLabel.trim() || "(none)",
+          roadScore,
+          nameHitsRoad,
+          nameHitsSideArea,
+          flatness,
+          footprint,
+          horizontalSpan,
+          nearGround,
+          triangles: triangleEstimate
+        });
+      });
+
+      const roadCandidates = meshRows
+        .filter((row) => row.roadScore >= 5.2 && row.flatness < 0.22 && row.horizontalSpan > 4)
+        .sort((a, b) => b.roadScore - a.roadScore);
+
+      if (roadCandidates.length < 6) {
+        const fallbackRoadCandidates = meshRows
+          .filter(
+            (row) =>
+              !row.nameHitsSideArea &&
+              row.flatness < 0.08 &&
+              row.horizontalSpan > 6 &&
+              row.nearGround &&
+              row.footprint > 30
+          )
+          .sort((a, b) => (b.footprint + b.horizontalSpan * 3) - (a.footprint + a.horizontalSpan * 3))
+          .slice(0, 25);
+
+        const existing = new Set(roadCandidates.map((row) => row.node.uuid));
+        fallbackRoadCandidates.forEach((candidate) => {
+          if (!existing.has(candidate.node.uuid)) {
+            roadCandidates.push(candidate);
+            existing.add(candidate.node.uuid);
+          }
+        });
+      }
+
+      const roadMeshes = roadCandidates.map((row) => row.node);
+      const allMeshes = meshRows.map((row) => row.node);
+      const topRoadRows = roadCandidates.slice(0, 8);
+
+      return {
+        nodeCount,
+        meshCount,
+        triangleCount,
+        materialCount: materialNames.size,
+        roadCandidates,
+        roadMeshes,
+        allMeshes,
+        topRoadRows
+      };
+    }
+
+    function updateAnalysisPanel(analysis, boundsSize) {
+      const lines = [];
+      lines.push(`Nodes: ${analysis.nodeCount}  Meshes: ${analysis.meshCount}  Materials: ${analysis.materialCount}`);
+      lines.push(`Triangles: ${Math.round(analysis.triangleCount).toLocaleString()}`);
+      lines.push(`Bounds: ${boundsSize.x.toFixed(1)} x ${boundsSize.y.toFixed(1)} x ${boundsSize.z.toFixed(1)}`);
+      lines.push(`Road candidates: ${analysis.roadCandidates.length}`);
+      lines.push(`Road lock: ${navigation.strictRoadLock ? "strict road-only" : "fallback to generic surfaces"}`);
+      lines.push("Top road-like meshes:");
+
+      if (analysis.topRoadRows.length === 0) {
+        lines.push("- none detected, using flat near-ground fallback surfaces");
+      } else {
+        analysis.topRoadRows.forEach((row, index) => {
+          lines.push(
+            `${index + 1}. ${formatShortName(row.name)} | score ${row.roadScore.toFixed(1)} | flat ${row.flatness.toFixed(3)} | area ${row.footprint.toFixed(1)}`
+          );
+        });
+      }
+
+      analysisEl.textContent = lines.join("\n");
+    }
+
+    function getSurfaceHit(x, z, targetMeshes) {
+      if (!navigation.cityBounds || targetMeshes.length === 0) {
+        return null;
+      }
+
+      const startY = navigation.cityBounds.max.y + 180;
+      const minY = navigation.cityBounds.min.y - 180;
+      raycastOrigin.set(x, startY, z);
+
+      roadRaycaster.set(raycastOrigin, downDirection);
+      roadRaycaster.far = startY - minY;
+
+      const hits = roadRaycaster.intersectObjects(targetMeshes, true);
+      for (let i = 0; i < hits.length; i += 1) {
+        const hit = hits[i];
+        if (!hit.face) {
+          return hit;
+        }
+        worldNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+        if (worldNormal.y >= navigation.minWalkNormalY) {
+          return hit;
+        }
+      }
+
+      return null;
+    }
+
+    function sampleWalkSurface(x, z) {
+      if (navigation.strictRoadLock && navigation.roadMeshes.length > 0) {
+        return getSurfaceHit(x, z, navigation.roadMeshes);
+      }
+      const roadHit = getSurfaceHit(x, z, navigation.roadMeshes);
+      if (roadHit) {
+        return roadHit;
+      }
+      return getSurfaceHit(x, z, navigation.allMeshes);
+    }
+
+    function isRoadCorridorValid(x, z, forwardDir, centerHit) {
+      if (!navigation.strictRoadLock || navigation.roadMeshes.length === 0) {
+        return true;
+      }
+
+      const lateral = new THREE.Vector3(-forwardDir.z, 0, forwardDir.x);
+      if (lateral.lengthSq() < 0.00001) {
+        lateral.set(1, 0, 0);
+      } else {
+        lateral.normalize();
+      }
+
+      const offset = navigation.roadEdgeBuffer;
+      const leftHit = getSurfaceHit(x + lateral.x * offset, z + lateral.z * offset, navigation.roadMeshes);
+      const rightHit = getSurfaceHit(x - lateral.x * offset, z - lateral.z * offset, navigation.roadMeshes);
+
+      if (!leftHit || !rightHit) {
+        return false;
+      }
+
+      const centerY = centerHit.point.y;
+      const maxSideDelta = navigation.maxStepHeight + 0.2;
+      if (Math.abs(leftHit.point.y - centerY) > maxSideDelta || Math.abs(rightHit.point.y - centerY) > maxSideDelta) {
+        return false;
+      }
+
+      return true;
+    }
+
+    function applyWalkCameraPose() {
+      lookDirection.set(Math.sin(navigation.yaw), -0.08, Math.cos(navigation.yaw)).normalize();
+      lookTarget.copy(navigation.position).addScaledVector(lookDirection, 12);
+      camera.position.copy(navigation.position);
+      camera.lookAt(lookTarget);
+    }
+
+    function tryFindSpawnPoint(center) {
+      if (!navigation.cityBounds) {
+        return null;
+      }
+
+      const spanX = navigation.cityBounds.max.x - navigation.cityBounds.min.x;
+      const spanZ = navigation.cityBounds.max.z - navigation.cityBounds.min.z;
+      const stepX = Math.max(8, spanX * 0.16);
+      const stepZ = Math.max(8, spanZ * 0.16);
+
+      const offsets = [
+        [0, 0],
+        [stepX, 0],
+        [-stepX, 0],
+        [0, stepZ],
+        [0, -stepZ],
+        [stepX, stepZ],
+        [-stepX, stepZ],
+        [stepX, -stepZ],
+        [-stepX, -stepZ],
+        [stepX * 2, 0],
+        [-stepX * 2, 0],
+        [0, stepZ * 2],
+        [0, -stepZ * 2]
+      ];
+
+      const allowFallback = !navigation.strictRoadLock || navigation.roadMeshes.length === 0;
+      let fallbackHit = null;
+
+      for (let i = 0; i < offsets.length; i += 1) {
+        const offset = offsets[i];
+        const sampleX = center.x + offset[0];
+        const sampleZ = center.z + offset[1];
+        const roadHit = getSurfaceHit(sampleX, sampleZ, navigation.roadMeshes);
+        if (roadHit) {
+          return roadHit;
+        }
+        if (allowFallback && !fallbackHit) {
+          fallbackHit = getSurfaceHit(sampleX, sampleZ, navigation.allMeshes);
+        }
+      }
+
+      return fallbackHit;
+    }
+
+    function setNavigationMode(mode) {
+      navigation.mode = mode;
+      const walkMode = mode === "walk";
+      controls.enabled = !walkMode;
+
+      if (walkMode) {
+        const snapped = sampleWalkSurface(camera.position.x, camera.position.z);
+        if (snapped) {
+          navigation.position.set(camera.position.x, snapped.point.y + navigation.eyeHeight, camera.position.z);
+        } else {
+          navigation.position.copy(camera.position);
+        }
+
+        camera.getWorldDirection(cameraDirection);
+        cameraDirection.y = 0;
+        if (cameraDirection.lengthSq() < 0.0001) {
+          cameraDirection.set(0, 0, 1);
+        }
+        cameraDirection.normalize();
+        navigation.yaw = Math.atan2(cameraDirection.x, cameraDirection.z);
+
+        applyWalkCameraPose();
+        statusEl.textContent = `Walk mode active: ArrowUp/Down move, ArrowLeft/Right turn. Press O for orbit mode. Road lock: ${navigation.strictRoadLock ? "ON" : "OFF"}`;
+      } else {
+        controls.target.set(
+          camera.position.x + Math.sin(navigation.yaw) * 8,
+          camera.position.y - 1,
+          camera.position.z + Math.cos(navigation.yaw) * 8
+        );
+        controls.update();
+        statusEl.textContent = "Orbit mode active: drag to inspect. Press O to return to walk mode.";
+      }
+    }
+
+    function initializeWalkState(center) {
+      const spawn = tryFindSpawnPoint(center);
+      if (spawn) {
+        navigation.position.set(spawn.point.x, spawn.point.y + navigation.eyeHeight, spawn.point.z);
+        navigation.lastRoadPosition.copy(navigation.position);
+        navigation.hasLastRoadPosition = true;
+      } else {
+        navigation.position.set(center.x, center.y + navigation.eyeHeight + 3, center.z + 6);
+        navigation.lastRoadPosition.copy(navigation.position);
+        navigation.hasLastRoadPosition = true;
+      }
+
+      navigation.yaw = Math.atan2(center.x - navigation.position.x, center.z - navigation.position.z);
+      navigation.ready = true;
+      applyWalkCameraPose();
+      setNavigationMode("walk");
+    }
+
+    function updateWalkNavigation(deltaSeconds) {
+      if (!navigation.ready || navigation.mode !== "walk") {
+        return;
+      }
+
+      let moveAxis = 0;
+      if (navigation.keys.has("ArrowUp")) {
+        moveAxis += 1;
+      }
+      if (navigation.keys.has("ArrowDown")) {
+        moveAxis -= 1;
+      }
+
+      let turnAxis = 0;
+      if (navigation.keys.has("ArrowLeft")) {
+        turnAxis += 1;
+      }
+      if (navigation.keys.has("ArrowRight")) {
+        turnAxis -= 1;
+      }
+
+      navigation.yaw += turnAxis * navigation.turnSpeed * deltaSeconds;
+
+      if (moveAxis !== 0) {
+        forwardVector.set(Math.sin(navigation.yaw), 0, Math.cos(navigation.yaw));
+        movementVector.copy(forwardVector).multiplyScalar(moveAxis * navigation.moveSpeed * deltaSeconds);
+
+        const nextX = navigation.position.x + movementVector.x;
+        const nextZ = navigation.position.z + movementVector.z;
+        const nextHit = sampleWalkSurface(nextX, nextZ);
+
+        if (nextHit) {
+          const nextY = nextHit.point.y + navigation.eyeHeight;
+          if (
+            Math.abs(nextY - navigation.position.y) <= navigation.maxStepHeight &&
+            isRoadCorridorValid(nextX, nextZ, forwardVector, nextHit)
+          ) {
+            navigation.position.set(nextX, nextY, nextZ);
+            navigation.lastRoadPosition.copy(navigation.position);
+            navigation.hasLastRoadPosition = true;
+          }
+        }
+      }
+
+      const standingHit = sampleWalkSurface(navigation.position.x, navigation.position.z);
+      if (standingHit) {
+        const desiredY = standingHit.point.y + navigation.eyeHeight;
+        navigation.position.y = THREE.MathUtils.lerp(
+          navigation.position.y,
+          desiredY,
+          Math.min(1, deltaSeconds * 14)
+        );
+        navigation.lastRoadPosition.copy(navigation.position);
+        navigation.hasLastRoadPosition = true;
+      } else if (navigation.strictRoadLock && navigation.hasLastRoadPosition) {
+        navigation.position.lerp(navigation.lastRoadPosition, Math.min(1, deltaSeconds * 16));
+      }
+
+      applyWalkCameraPose();
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (isArrowKey(event.code)) {
+        event.preventDefault();
+        navigation.keys.add(event.code);
+      }
+
+      if (event.code === "KeyO" && navigation.ready) {
+        event.preventDefault();
+        if (navigation.mode === "walk") {
+          setNavigationMode("orbit");
+        } else {
+          setNavigationMode("walk");
+        }
+      }
+    });
+
+    window.addEventListener("keyup", (event) => {
+      if (isArrowKey(event.code)) {
+        event.preventDefault();
+        navigation.keys.delete(event.code);
+      }
+    });
+
+    const hemi = new THREE.HemisphereLight(0xc8deff, 0x2e3f4f, 0.55);
+    scene.add(hemi);
+
+    const key = new THREE.DirectionalLight(0xffffff, 1.45);
+    key.position.set(28, 34, 20);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.left = -100;
+    key.shadow.camera.right = 100;
+    key.shadow.camera.top = 100;
+    key.shadow.camera.bottom = -100;
+    key.shadow.camera.near = 1;
+    key.shadow.camera.far = 250;
+    scene.add(key);
+
+    const fill = new THREE.DirectionalLight(0x7fb3ff, 0.35);
+    fill.position.set(-18, 16, -15);
+    scene.add(fill);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1200, 1200),
+      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.22 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+
+    new RGBELoader().load(
+      "assets/neutral.hdr",
+      (hdrTexture) => {
+        const envMap = pmrem.fromEquirectangular(hdrTexture).texture;
+        scene.environment = envMap;
+        hdrTexture.dispose();
+      },
+      undefined,
+      () => {
+        statusEl.textContent = "Loaded city model without HDR environment.";
+      }
+    );
+
+    const gltfLoader = new GLTFLoader();
+
+    gltfLoader.load(
+      "assets/city.glb",
+      (gltf) => {
+        const city = gltf.scene;
+
+        city.traverse((node) => {
+          if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+
+        const bounds = new THREE.Box3().setFromObject(city);
+        const center = bounds.getCenter(new THREE.Vector3());
+        const size = bounds.getSize(new THREE.Vector3());
+
+        city.position.set(-center.x, -center.y, -center.z);
+
+        const maxAxis = Math.max(size.x, size.y, size.z);
+        const targetSize = 95;
+        if (maxAxis > 0) {
+          const scale = targetSize / maxAxis;
+          city.scale.setScalar(scale);
+        }
+
+        const scaledBounds = new THREE.Box3().setFromObject(city);
+        city.position.y -= scaledBounds.min.y;
+
+        scene.add(city);
+
+        const finalBounds = new THREE.Box3().setFromObject(city);
+        const finalSize = finalBounds.getSize(new THREE.Vector3());
+        const finalCenter = finalBounds.getCenter(new THREE.Vector3());
+
+        navigation.cityBounds = finalBounds.clone();
+        currentModelAnalysis = analyzeCityModel(city, finalBounds);
+        navigation.roadMeshes = currentModelAnalysis.roadMeshes;
+        navigation.roadMeshSet = new Set(currentModelAnalysis.roadMeshes.map((mesh) => mesh.uuid));
+        navigation.allMeshes = currentModelAnalysis.allMeshes;
+        navigation.strictRoadLock = navigation.roadMeshes.length > 0;
+        updateAnalysisPanel(currentModelAnalysis, finalSize);
+
+        console.groupCollapsed("city.glb analysis");
+        console.log("Summary", {
+          nodes: currentModelAnalysis.nodeCount,
+          meshes: currentModelAnalysis.meshCount,
+          materials: currentModelAnalysis.materialCount,
+          triangles: Math.round(currentModelAnalysis.triangleCount),
+          roadCandidates: currentModelAnalysis.roadCandidates.length
+        });
+        console.table(
+          currentModelAnalysis.topRoadRows.map((row, index) => ({
+            rank: index + 1,
+            mesh: row.name,
+            roadScore: Number(row.roadScore.toFixed(2)),
+            flatness: Number(row.flatness.toFixed(4)),
+            area: Number(row.footprint.toFixed(2)),
+            triangles: Math.round(row.triangles),
+            material: row.material
+          }))
+        );
+        console.groupEnd();
+
+        const fitSize = Math.max(finalSize.x, finalSize.y, finalSize.z);
+        const distance = fitSize * 1.18;
+
+        camera.near = Math.max(0.1, distance / 1200);
+        camera.far = Math.max(3000, distance * 12);
+        camera.updateProjectionMatrix();
+
+        camera.position.set(
+          finalCenter.x + distance,
+          finalCenter.y + distance * 0.58,
+          finalCenter.z + distance * 0.88
+        );
+        controls.target.copy(finalCenter);
+        controls.update();
+
+        key.target.position.copy(finalCenter);
+        scene.add(key.target);
+
+        ground.position.y = Math.max(0, finalBounds.min.y - 0.02);
+
+        initializeWalkState(finalCenter);
+      },
+      (event) => {
+        if (!event.total) {
+          return;
+        }
+        const progress = Math.round((event.loaded / event.total) * 100);
+        statusEl.textContent = `Loading model... ${progress}%`;
+      },
+      (error) => {
+        console.error(error);
+        statusEl.textContent = "Failed to load assets/city.glb. Run from a local server if opened via file://.";
+      }
+    );
+
+    function renderLoop() {
+      const delta = Math.min(0.05, clock.getDelta());
+      updateWalkNavigation(delta);
+      if (controls.enabled) {
+        controls.update();
+      }
+      renderer.render(scene, camera);
+      requestAnimationFrame(renderLoop);
+    }
+
+    renderLoop();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    });
+  </script>
+</body>
+</html>

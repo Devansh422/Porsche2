@@ -10,32 +10,28 @@
     <!-- BOTTOM LAYER: Scrollable Sections -->
     <div id="scroll-container">
         <!-- TOP LAYER: Fixed 3D Scene (GLB Model) -->
-        <div id="three-container" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: auto; z-index: 10;">
+        <div id="three-container" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: auto; z-index: 60;">
             <div id="three-content"></div>
         </div>
         <div id="sections">
-            <!-- 9 sections of 100vh each -->
-            <section class="section" id="section1">Section 1 - Front View</section>
-            <section class="section" id="section2">Section 2 - Right Front</section>
-            <section class="section" id="section3">Section 3 - Side View</section>
-            <section class="section" id="section4">Section 4 - Right Side</section>
-            <section class="section" id="section5">Section 5 - Rear Right</section>
-            <section class="section" id="section6">Section 6 - Rear View</section>
-            <section class="section" id="section7">Section 7 - Rear Left</section>
-            <section class="section" id="section8">Section 8 - Left Rear</section>
-            <section class="section" id="section9">Section 9 - Left Side</section>
+            <!-- Variable-height sections -->
+            <section class="section" style="height: 200vh;" id="section1"></section>
         </div>
     </div>
 
     <!-- Debug Info (always on top) -->
-    <div id="debug-info" style="position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
-        <div>Position: <span id="position">0, 0, 0</span></div>
-        <div>Rotation: <span id="rotation">0, 0, 0</span></div>
-        <div>Model Section: <span id="model-section">1 / 9</span></div>
-        <div>Pivot Offset: <span id="pivot-offset">0, 0, 0</span></div>
-        <div>Pivot Section: <span id="pivot-section">1 / 9</span></div>
-        <div>Pivot Step: <span id="pivot-step">0.10</span></div>
-        <div>Keys: <span id="pivot-keys">Arrows X/Z, PgUp/PgDn Y, [/] step, 0 reset, H axes, Shift+Drag move, Alt+Drag rotate</span></div>
+    <div id="debug-info" style="display: none; position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
+        <div>Section: <span id="model-section">1 / 1</span></div>
+        <div>Position: X <input id="pos-x" type="number" step="0.01" style="width:72px;"> Y <input id="pos-y" type="number" step="0.01" style="width:72px;"> Z <input id="pos-z" type="number" step="0.01" style="width:72px;"></div>
+        <div>Rotation: X <input id="rot-x" type="number" step="0.01" style="width:72px;"> Y <input id="rot-y" type="number" step="0.01" style="width:72px;"> Z <input id="rot-z" type="number" step="0.01" style="width:72px;"></div>
+        <div>Axis: X <input id="axis-x" type="number" step="0.01" style="width:72px;"> Y <input id="axis-y" type="number" step="0.01" style="width:72px;"> Z <input id="axis-z" type="number" step="0.01" style="width:72px;"></div>
+        <div>Light: X <input id="light-x" type="number" step="0.01" style="width:72px;"> Y <input id="light-y" type="number" step="0.01" style="width:72px;"> Z <input id="light-z" type="number" step="0.01" style="width:72px;"></div>
+        <div>Neon: <select id="neon-target" style="width:64px;"></select> X <input id="neon-x" type="number" step="0.01" style="width:62px;"> Y <input id="neon-y" type="number" step="0.01" style="width:62px;"> Z <input id="neon-z" type="number" step="0.01" style="width:62px;"></div>
+        <div>Neon Params: I <input id="neon-intensity" type="number" step="0.1" style="width:62px;"> D <input id="neon-distance" type="number" step="0.1" style="width:62px;"> E <input id="neon-emissive" type="number" step="0.1" style="width:62px;"> A <input id="neon-amp" type="number" step="0.1" style="width:62px;"> S <input id="neon-speed" type="number" step="0.1" style="width:62px;"> P <input id="neon-phase" type="number" step="0.1" style="width:62px;"> Rx <input id="neon-rx" type="number" step="0.01" style="width:62px;"> Ry <input id="neon-ry" type="number" step="0.01" style="width:62px;"> Rz <input id="neon-rz" type="number" step="0.01" style="width:62px;"></div>
+        <div>Tip: Shift + Drag moves position, Alt + Drag rotates, and Left/Right arrows steer front wheels.</div>
+        <div>Wheel Controls: T toggle, R faster, F slower, G stop</div>
+        <div>Door Controls: 1 left, 2 right, 3 all, 0 close, 4 flip direction, 5 manual door</div>
+        <div id="door-debug">Doors: analyzing...</div>
     </div>
 
     <!-- CDN Scripts as per user specification -->
@@ -89,9 +85,89 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
         // Three.js setup
-        let scene, camera, renderer, model, modelRig, modelPivot, controls, pivotHelper;
+        let scene, camera, renderer, composer, bloomPass, model, modelRig, modelPivot, garageModel, controls, pivotHelper, keyLight, rimLight, ambientLight, fillLight, shadowCatcher, shadowMaterial, contactShadowCatcher, contactShadowMaterial;
+        let neonRigGroup = null;
+        const neonFlickerLights = [];
+        const neonPointEntries = [];
+        const tubeFixtureEntries = [];
+        let neonDebuggerReady = false;
+        let activeNeonTargetId = 'P1';
+        const neonPointConfigs = [
+            {
+                id: 'P1',
+                color: 0x39FF14,
+                intensity: 14,
+                distance: 21,
+                decay: 2,
+                emissiveIntensity: 2.9,
+                position: new THREE.Vector3(-10.2, 2.2, 2.0),
+                orientation: 'y',
+                flickerAmplitude: 2.0,
+                flickerSpeed: 1.8,
+                flickerPhase: 0.4,
+                rotationX: -0.5,
+                rotationY: 0,
+                rotationZ: -0.5
+            },
+            {
+                id: 'P3',
+                color: 0xCCFF00,
+                intensity: 15,
+                distance: 15,
+                decay: 2,
+                emissiveIntensity: 2.7,
+                position: new THREE.Vector3(0.2, 5.26, -5.4),
+                orientation: 'z',
+                flickerAmplitude: 1.2,
+                flickerSpeed: 1.5,
+                flickerPhase: 2.3,
+                rotationX: -0.4,
+                rotationY: 0,
+                rotationZ: 0
+            }
+        ];
+        const tubeFixtureConfigs = [
+            {
+                id: 'T1',
+                color: 0x00ffff,
+                position: new THREE.Vector3(0, 5, 5),
+                intensity: 12,
+                distance: 10,
+                emissiveIntensity: 1.5,
+                flickerAmplitude: 1.0,
+                flickerSpeed: 1.4,
+                flickerPhase: 0.1,
+                rotationX: 0,
+                rotationY: 0,
+                rotationZ: 0
+            },
+            {
+                id: 'T3',
+                color: 0xFF1493,
+                position: new THREE.Vector3(6.9, 3.4, 0.7),
+                intensity: 15,
+                distance: 22,
+                emissiveIntensity: 3.2,
+                flickerAmplitude: 1.3,
+                flickerSpeed: 1.5,
+                flickerPhase: 1.6,
+                rotationX: 0.31,
+                rotationY: 0.05,
+                rotationZ: -0.92
+            }
+        ];
+        let cyberpunkNeonSetupDone = false;
+        let garageFloorWorldY = Number.NaN;
+        let neutralEnvironmentTexture = null;
+        let forestEnvironmentTexture = null;
+        let sunsetEnvironmentTexture = null;
+        let skyEnvironmentTexture = null;
+        let activeEnvironmentPreset = 'neutral';
         let modelScrollTimeline = null;
         let dragControlsReady = false;
         let isTranslateDrag = false;
@@ -106,18 +182,161 @@
         const dragPlane = new THREE.Plane();
         const dragIntersection = new THREE.Vector3();
         const dragOffset = new THREE.Vector3();
+        const lastDragRigPosition = new THREE.Vector3();
+        const dragMovement = new THREE.Vector3();
+        const orbitOffset = new THREE.Vector3();
+        const orbitHorizontal = new THREE.Vector3();
+        const shadowBaseCenter = new THREE.Vector3();
         let dragLastX = 0;
+        let isShiftPressed = false;
+        let isAltPressed = false;
         let activeSectionIndex = 0;
         const smoothPivotEnabled = true;
-        let pivotStep = 0.1;
-        let pivotControlsReady = false;
+        let shadowGroundBaseY = 0;
+        let keyframeEditorReady = false;
+        const fixedShadowSettings = {
+            opacity: 0.18,
+            intensity: 0.18,
+            bias: -0.00008,
+            groundOffset: -0.03
+        };
+        const defaultLightPoint = [20, 30, -20];
+        const orbitMinPolarAngle = THREE.MathUtils.degToRad(5);
+        const orbitMaxPolarAngle = THREE.MathUtils.degToRad(88);
+        const minimumCameraHeightAboveGarage = 0.18;
+        const animationClock = new THREE.Clock();
+        const wheelNamePattern = /(wheel|whl|tyre|tire|rim|trim|centerlock|hub|disc|disk|rotor)/i;
+        const wheelStaticPartPattern = /(caliper|calliper)/i;
+        const manualWheelExcludeLabels = [
+            'object_381 sketchfab_scene',
+            'object_375 sketchfab_scene',
+            'object_393 sketchfab_scene',
+            'object_387 sketchfab_scene'
+        ];
+        const manualWheelExcludeNames = new Set([
+            'object_381',
+            'object_375',
+            'object_393',
+            'object_387',
+            'object_30',
+            'object_39',
+            'object_51',
+            'object_42'
+        ]);
+        const manualCaliperMeshByWheelIndex = [
+            'object_375',
+            'object_393',
+            'object_387',
+            'object_381'
+        ];
+        const manualExtraCaliperMeshNames = [
+            'object_30',
+            'object_39',
+            'object_51',
+            'object_42'
+        ];
+        const hardcodedWheelAxisPoints = [
+            new THREE.Vector3(-9.02, 1.40, -13.98),
+            new THREE.Vector3(-15.65, 1.40, -14.01),
+            new THREE.Vector3(-15.65, 1.54, -4.38),
+            new THREE.Vector3(-9.02, 1.54, -4.35)
+        ];
+        const wheelRigs = [];
+        const doorRigs = [];
+        const doorAnalysisRows = [];
+        let wheelControlsReady = false;
+        let doorControlsReady = false;
+        let wheelAutoSpin = false;
+        let wheelSpinSpeed = 6;
+        const doorOpenAngle = THREE.MathUtils.degToRad(58);
+        const doorAnimationDuration = 0.22;
+        const doorSnapEpsilon = THREE.MathUtils.degToRad(0.08);
+        let doorOpenDirectionMultiplier = 1;
+        const caliperDebugStatus = [];
+        let steeringControlsReady = false;
+        const frontWheelIndices = [];
+        let steerLeftPressed = false;
+        let steerRightPressed = false;
+        let steeringAngle = 0;
+        let steeringTargetAngle = 0;
+        const maxSteeringAngle = THREE.MathUtils.degToRad(30);
+        const steeringAnimationDuration = 0.25;
+        const steeringSnapEpsilon = THREE.MathUtils.degToRad(0.05);
+        const doorNamePattern = /(door|porta|puerta|portiera|tuer)/i;
+        const doorSideLeftPattern = /(left|\blh\b|driver|_l\b|\bl\b|sx|izq)/i;
+        const doorSideRightPattern = /(right|\brh\b|passenger|_r\b|\br\b|dx|der)/i;
+        const doorFrontPattern = /(front|\bfr\b|fwd|fore|avant)/i;
+        const doorRearPattern = /(rear|back|aft|\brr\b|post|hinten)/i;
+        const doorIgnorePattern = /(wheel|rim|tyre|tire|glass|window|mirror|handle|hood|bonnet|trunk|boot|bumper|fender|spoiler|roof|wiper|light|lamp|caliper)/i;
+        const manualDoorGroupNodeNames = [
+            ['Object_471', 'Object_435', 'Object_84', 'Object_438', 'Object_138', 'Object_435', 'Object_414', 'Object_204', 'Object_276', 'Object_279','Object_183', 'Object_57','Object_147', 'Object_18', 'Object_411', 'Object_99', 'Object_171', 'Object_258', 'Object_207' ],
+            ['Object_420', 'Object_474', 'Object_141', 'Object_441', 'Object_87', 'Object_444', 'Object_90', 'Object_417', 'Object_201', 'Object_150','Object_24', 'Object_273', 'Object_186', 'Object_213', 'Object_282', 'Object_456', 'Object_177', 'Object_153', 'Object_63', 'Object_261']
+        ];
+        // Hardcoded hinge pivots in world space [x, y, z] for manual door groups.
+        const manualDoorGroupPivotWorldPoints = [
+            [-13.81, 0.88, -11.719],
+            [-7.27, 0.88, -11.719]
+        ];
+        const doorPivotMarkerColors = [
+            0xff3b30,
+            0x30d158,
+            0x0a84ff,
+            0xff9f0a,
+            0xbf5af2,
+            0x64d2ff
+        ];
+        let doorPivotMarkersVisible = false;
+        const maxScrollDeltaPerFrame = 180;
+        let scrollWheelSpinIntensity = 0.5;
+        let scrollWheelSmoothDuration = 0.18;
+        let smoothedScrollWheelDelta = 0;
+        let lastScrollTop = scrollContainer.scrollTop || 0;
+        const coolShadowFillColor = [0.7, 0.75, 0.85];
+        const coolShadowFillGroundColor = [0.2, 0.22, 0.26];
+        const coolShadowFillIntensity = 0.2;
+        const defaultAmbientLightColor = [0.04, 0.04, 0.16];
+        const defaultAmbientLightIntensity = 0.14;
+        const defaultFillLightColor = [0.08, 0.14, 0.3];
+        const defaultFillGroundColor = [0.02, 0.02, 0.05];
+        const defaultFillLightIntensity = 0.045;
+        const defaultShadowColor = [0.05, 0.06, 0.12];
+        const defaultShadowOpacity = fixedShadowSettings.opacity;
+        const defaultContactShadowOpacity = 0.26;
+        const defaultShadowRadius = 1.2;
+        const forestHdriPath = 'assets/forest.hdr';
+        const forestEnvironmentFallbackPath = 'assets/d3.jpg';
+        const sunsetHdriPath = 'assets/sunset.hdr';
+        const sunsetEnvironmentFallbackPath = 'assets/d4.jpg';
+        const skyHdriPath = 'assets/sky.hdr';
+        const skyEnvironmentFallbackPath = 'assets/d5.jpg';
+        const garageModelPath = 'assets/garage.glb';
+        const garagePlacementOffset = new THREE.Vector3(0, 0, 0);
+        const garageUniformScale = 4;
+        const defaultEnvironmentIntensityScale = 0.68;
+        const defaultMinimumRoughness = 0;
+        const defaultSunsetEnvironmentBlend = 0;
+        const defaultSkyEnvironmentBlend = 0;
+        const defaultMoonLightColor = [0.267, 0.267, 0.533];
+        const defaultRimLightColor = [0.06, 0.1, 0.22];
+        const defaultRimLightPoint = [0, 4, -10];
+        const defaultRimLightIntensity = 0.1;
+        const defaultFogColor = [0.008, 0.008, 0.04];
+        const defaultFogDensity = 0.05;
+        const defaultBloomStrength = 0.24;
+        const defaultBloomThreshold = 0.5;
+        const defaultBloomRadius = 0.5;
+        const modelMaterialStates = [];
+        let lastAppliedEnvironmentIntensityScale = defaultEnvironmentIntensityScale;
+        let lastAppliedMinimumRoughness = defaultMinimumRoughness;
 
         initThreeJS();
+        updateCaliperDebugInfo();
         animate();
 
         function initThreeJS() {
             // Scene
             scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x02020a, defaultFogDensity);
 
             pivotHelper = new THREE.AxesHelper(2);
             scene.add(pivotHelper);
@@ -131,11 +350,25 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.84;
             renderer.outputEncoding = THREE.sRGBEncoding;
-            renderer.setClearColor(0x000000, 0);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.setClearColor(0x02020a, 1);
             renderer.domElement.style.pointerEvents = 'auto';
             renderer.domElement.style.cursor = 'grab';
             threeContainer.appendChild(renderer.domElement);
+
+            const renderPass = new RenderPass(scene, camera);
+            bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                defaultBloomStrength,
+                defaultBloomRadius,
+                defaultBloomThreshold
+            );
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderPass);
+            composer.addPass(bloomPass);
 
             // Loading indicator
             const loadingDiv = document.createElement('div');
@@ -152,18 +385,113 @@
             loadingDiv.textContent = 'Loading Porsche model...';
             document.body.appendChild(loadingDiv);
 
+            const pmremGenerator = new THREE.PMREMGenerator(renderer);
+            pmremGenerator.compileEquirectangularShader();
+
             // Lighting with HDR
             new RGBELoader()
                 .setPath('assets/')
                 .load('neutral.hdr', function (texture) {
                     texture.mapping = THREE.EquirectangularReflectionMapping;
-                    scene.environment = texture;
+                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                    neutralEnvironmentTexture = environmentTarget.texture;
+                    texture.dispose();
+                    applyEnvironmentPreset(activeEnvironmentPreset);
                 }, undefined, function (error) {
                     console.error('Error loading HDR:', error);
                 });
 
-            // Load GLB model - GLTFLoader works with both .gltf and .glb files
+            const loadForestEnvironmentFallback = () => {
+                new THREE.TextureLoader().load(forestEnvironmentFallbackPath, function (texture) {
+                    texture.mapping = THREE.EquirectangularReflectionMapping;
+                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                    forestEnvironmentTexture = environmentTarget.texture;
+                    texture.dispose();
+                    applyEnvironmentPreset(activeEnvironmentPreset);
+                }, undefined, function (error) {
+                    console.warn('Forest environment map fallback failed:', error);
+                });
+            };
+
+            new RGBELoader().load(forestHdriPath, function (texture) {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                forestEnvironmentTexture = environmentTarget.texture;
+                texture.dispose();
+                applyEnvironmentPreset(activeEnvironmentPreset);
+            }, undefined, function () {
+                loadForestEnvironmentFallback();
+            });
+
+            const loadSunsetEnvironmentFallback = () => {
+                new THREE.TextureLoader().load(sunsetEnvironmentFallbackPath, function (texture) {
+                    texture.mapping = THREE.EquirectangularReflectionMapping;
+                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                    sunsetEnvironmentTexture = environmentTarget.texture;
+                    texture.dispose();
+                    applyEnvironmentPreset(activeEnvironmentPreset);
+                }, undefined, function (error) {
+                    console.warn('Sunset environment map fallback failed:', error);
+                });
+            };
+
+            new RGBELoader().load(sunsetHdriPath, function (texture) {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                sunsetEnvironmentTexture = environmentTarget.texture;
+                texture.dispose();
+                applyEnvironmentPreset(activeEnvironmentPreset);
+            }, undefined, function () {
+                loadSunsetEnvironmentFallback();
+            });
+
+            const loadSkyEnvironmentFallback = () => {
+                new THREE.TextureLoader().load(skyEnvironmentFallbackPath, function (texture) {
+                    texture.mapping = THREE.EquirectangularReflectionMapping;
+                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                    skyEnvironmentTexture = environmentTarget.texture;
+                    texture.dispose();
+                    applyEnvironmentPreset(activeEnvironmentPreset);
+                }, undefined, function (error) {
+                    console.warn('Sky environment map fallback failed:', error);
+                });
+            };
+
+            new RGBELoader().load(skyHdriPath, function (texture) {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                const environmentTarget = pmremGenerator.fromEquirectangular(texture);
+                skyEnvironmentTexture = environmentTarget.texture;
+                texture.dispose();
+                applyEnvironmentPreset(activeEnvironmentPreset);
+            }, undefined, function () {
+                loadSkyEnvironmentFallback();
+            });
+
+            // Load GLB models - GLTFLoader works with both .gltf and .glb files
             const loader = new GLTFLoader();
+            loader.load(
+                garageModelPath,
+                function (gltf) {
+                    garageModel = gltf.scene;
+                    garageModel.scale.setScalar(garageUniformScale);
+
+                    garageModel.traverse((node) => {
+                        if (node.isMesh) {
+                            node.castShadow = false;
+                            node.receiveShadow = true;
+                        }
+                    });
+
+                    scene.add(garageModel);
+                    alignGarageToCar();
+                    console.log('Garage GLB model loaded successfully!');
+                },
+                undefined,
+                function (error) {
+                    console.warn('Error loading garage GLB model:', error);
+                }
+            );
+
             loader.load(
                 'assets/porsche.glb', // This is a .glb file, GLTFLoader handles it correctly
                 function (gltf) {
@@ -174,19 +502,85 @@
                     modelRig.add(modelPivot);
                     modelPivot.add(model);
 
+                    // Enable shadow casting for all model meshes.
+                    model.traverse((node) => {
+                        if (node.isMesh) {
+                            node.castShadow = true;
+                            node.receiveShadow = true;
+                        }
+                    });
+
+                    cacheModelMaterialStates(model);
+
+                    const detectedWheelRigs = createWheelRigs(model);
+                    wheelRigs.length = 0;
+                    wheelRigs.push(...detectedWheelRigs);
+
                     // Center the model
                     const box = new THREE.Box3().setFromObject(model);
                     const center = box.getCenter(new THREE.Vector3());
                     model.position.sub(center);
                     modelBasePosition.copy(model.position);
 
+                    analyzePorscheModel(model, gltf);
+                    analyzeAndRigDoors(model);
+
+                    // Apply manual wheel axis points after centering, then detect front wheels.
+                    applyHardcodedWheelAxisPoints();
+                    updateFrontWheelIndices();
+                    attachMappedCalipersToWheelSteering(model);
+                    applyFrontWheelSteering(steeringAngle);
+
+                    // Add a transparent ground plane that only shows shadows.
+                    const centeredBox = new THREE.Box3().setFromObject(model);
+                    const modelSize = centeredBox.getSize(new THREE.Vector3());
+                    const centeredBoxCenter = centeredBox.getCenter(new THREE.Vector3());
+                    const groundSize = Math.max(modelSize.x, modelSize.z) * 2.1;
+                    shadowMaterial = new THREE.ShadowMaterial({ opacity: fixedShadowSettings.opacity });
+                    shadowCatcher = new THREE.Mesh(
+                        new THREE.PlaneGeometry(groundSize, groundSize),
+                        shadowMaterial
+                    );
+                    shadowCatcher.rotation.x = -Math.PI / 2;
+                    shadowGroundBaseY = centeredBox.min.y;
+                    shadowBaseCenter.copy(centeredBoxCenter);
+                    shadowCatcher.position.x = shadowBaseCenter.x;
+                    shadowCatcher.position.z = shadowBaseCenter.z;
+                    shadowCatcher.position.y = shadowGroundBaseY + fixedShadowSettings.groundOffset;
+                    shadowCatcher.receiveShadow = true;
+                    modelRig.add(shadowCatcher);
+
+                    const contactShadowSize = Math.max(modelSize.x, modelSize.z) * 0.95;
+                    contactShadowMaterial = new THREE.ShadowMaterial({ opacity: defaultContactShadowOpacity });
+                    contactShadowCatcher = new THREE.Mesh(
+                        new THREE.PlaneGeometry(contactShadowSize, contactShadowSize),
+                        contactShadowMaterial
+                    );
+                    contactShadowCatcher.rotation.x = -Math.PI / 2;
+                    contactShadowCatcher.position.y = shadowCatcher.position.y + 0.002;
+                    contactShadowCatcher.receiveShadow = true;
+                    modelRig.add(contactShadowCatcher);
+                    updateShadowCatchersPlacement();
+
+                    if (keyLight) {
+                        keyLight.target = modelRig;
+                    }
+
+                    if (rimLight) {
+                        rimLight.target = modelRig;
+                    }
+
                     applyPivotOffsetFromKeyframe(0);
+                    applyLightFromKeyframe(0);
+                    updateKeyframeEditorInputs();
 
                     // Add orbit controls for cursor interaction (but disable scrolling interference)
                     controls = new OrbitControls(camera, renderer.domElement);
                     controls.enableDamping = true;
                     controls.dampingFactor = 0.1;
                     controls.rotateSpeed = 0.6;
+                    controls.minPolarAngle = orbitMinPolarAngle;
+                    controls.maxPolarAngle = orbitMaxPolarAngle;
                     // Important: Disable orbit controls from interfering with scroll
                     controls.enablePan = false;
                     controls.enableZoom = false;
@@ -210,9 +604,16 @@
                         renderer.domElement.style.cursor = 'grab';
                     });
 
-                    setupPivotDebugControls();
+                    setupKeyframeEditorControls();
+                    setupWheelControls();
+                    setupDoorControls();
+                    setupWheelSteeringControls();
                     setupModelDragControls();
                     setupModelScrollAnimations(sections, modelRig, modelPivot);
+                    setupCyberpunkNeonRig(modelRig);
+                    setupNeonDebuggerControls();
+                    applyHardcodedManualDoorPivotWorldPoints();
+                    alignGarageToCar();
                     ScrollTrigger.refresh();
 
                     // Remove loading indicator
@@ -231,24 +632,73 @@
             );
 
             // Add ambient light
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            ambientLight = new THREE.AmbientLight(0x0a0a2a, defaultAmbientLightIntensity);
             scene.add(ambientLight);
 
+            fillLight = new THREE.HemisphereLight(0xffffff, 0xffffff, defaultFillLightIntensity);
+            fillLight.color.setRGB(
+                defaultFillLightColor[0],
+                defaultFillLightColor[1],
+                defaultFillLightColor[2]
+            );
+            fillLight.groundColor.setRGB(
+                defaultFillGroundColor[0],
+                defaultFillGroundColor[1],
+                defaultFillGroundColor[2]
+            );
+            scene.add(fillLight);
+
             // Add directional light
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-            directionalLight.position.set(5, 10, 7);
-            scene.add(directionalLight);
+            keyLight = new THREE.DirectionalLight(0x444488, fixedShadowSettings.intensity);
+            keyLight.position.set(
+                defaultLightPoint[0],
+                defaultLightPoint[1],
+                defaultLightPoint[2]
+            );
+            keyLight.castShadow = true;
+            keyLight.shadow.mapSize.set(4096, 4096);
+            keyLight.shadow.bias = fixedShadowSettings.bias;
+            keyLight.shadow.normalBias = 0.06;
+            keyLight.shadow.radius = defaultShadowRadius;
+            keyLight.shadow.camera.near = 0.5;
+            keyLight.shadow.camera.far = 100;
+            keyLight.shadow.camera.left = -24;
+            keyLight.shadow.camera.right = 24;
+            keyLight.shadow.camera.top = 24;
+            keyLight.shadow.camera.bottom = -24;
+            scene.add(keyLight);
+
+            rimLight = new THREE.DirectionalLight(0x102040, defaultRimLightIntensity);
+            rimLight.position.set(
+                defaultRimLightPoint[0],
+                defaultRimLightPoint[1],
+                defaultRimLightPoint[2]
+            );
+            rimLight.castShadow = false;
+            scene.add(rimLight);
 
             // Handle window resize
             window.addEventListener('resize', () => {
                 camera.aspect = window.innerWidth / window.innerHeight;
                 camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
+                if (composer) {
+                    composer.setSize(window.innerWidth, window.innerHeight);
+                }
+                if (bloomPass) {
+                    bloomPass.setSize(window.innerWidth, window.innerHeight);
+                }
+
+                if (modelRig && modelPivot) {
+                    setupModelScrollAnimations(sections, modelRig, modelPivot);
+                    ScrollTrigger.refresh();
+                }
             });
         }
 
         function animate() {
             requestAnimationFrame(animate);
+            const deltaTime = animationClock.getDelta();
 
             if (controls) {
                 if (modelPivot) {
@@ -260,25 +710,106 @@
                 }
 
                 controls.update();
+                enforceCameraAboveGarageGround();
             }
 
             if (!isTranslateDrag && !isRotateDrag) {
                 syncPivotOffsetToSection();
             }
 
-            // Update debug info
-            if (modelRig || modelPivot || model) {
-                const posTarget = modelRig || modelPivot || model;
-                const rotTarget = modelPivot || model;
-                const pos = posTarget.position;
-                const rot = rotTarget.rotation;
-                document.getElementById('position').textContent =
-                    `${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}`;
-                document.getElementById('rotation').textContent =
-                    `${rot.x.toFixed(2)}, ${rot.y.toFixed(2)}, ${rot.z.toFixed(2)}`;
+            if (isTranslateDrag || isRotateDrag) {
+                syncActiveDragTransform();
             }
 
-            renderer.render(scene, camera);
+            updateScrollDrivenWheelRotation(deltaTime);
+
+            if (wheelAutoSpin && wheelSpinSpeed !== 0) {
+                rotateWheels(wheelSpinSpeed * deltaTime);
+            }
+
+            updateSteeringAnimation(deltaTime);
+            updateDoorAnimation(deltaTime);
+
+            updateCyberpunkNeonRig(animationClock.elapsedTime);
+
+            if (composer) {
+                composer.render();
+            } else {
+                renderer.render(scene, camera);
+            }
+        }
+
+        function cacheModelMaterialStates(root) {
+            modelMaterialStates.length = 0;
+            const seenMaterialIds = new Set();
+
+            if (!root) {
+                return;
+            }
+
+            root.traverse((node) => {
+                if (!node || !node.isMesh || !node.material) {
+                    return;
+                }
+
+                const materials = Array.isArray(node.material) ? node.material : [node.material];
+                for (const material of materials) {
+                    if (!material || seenMaterialIds.has(material.uuid)) {
+                        continue;
+                    }
+
+                    seenMaterialIds.add(material.uuid);
+                    modelMaterialStates.push({
+                        material,
+                        baseEnvMapIntensity: Number.isFinite(material.envMapIntensity) ? material.envMapIntensity : 1,
+                        baseRoughness: Number.isFinite(material.roughness) ? material.roughness : null
+                    });
+                }
+            });
+        }
+
+        function applyEnvironmentPreset() {
+            if (!scene || !neutralEnvironmentTexture) {
+                return;
+            }
+
+            activeEnvironmentPreset = 'neutral';
+            if (scene.environment !== neutralEnvironmentTexture) {
+                scene.environment = neutralEnvironmentTexture;
+            }
+        }
+
+        function applyMaterialSurfaceLook(environmentIntensityScale, minimumRoughness, force = false) {
+            const clampedEnvironmentIntensityScale = Math.max(0, environmentIntensityScale);
+            const clampedMinimumRoughness = THREE.MathUtils.clamp(minimumRoughness, 0, 1);
+
+            const shouldApply = force
+                || Math.abs(clampedEnvironmentIntensityScale - lastAppliedEnvironmentIntensityScale) > 0.0005
+                || Math.abs(clampedMinimumRoughness - lastAppliedMinimumRoughness) > 0.0005;
+
+            if (!shouldApply) {
+                return;
+            }
+
+            lastAppliedEnvironmentIntensityScale = clampedEnvironmentIntensityScale;
+            lastAppliedMinimumRoughness = clampedMinimumRoughness;
+
+            for (const entry of modelMaterialStates) {
+                const material = entry.material;
+                if (!material) {
+                    continue;
+                }
+
+                if (Number.isFinite(material.envMapIntensity)) {
+                    material.envMapIntensity = entry.baseEnvMapIntensity * clampedEnvironmentIntensityScale;
+                }
+
+                if (entry.baseRoughness !== null && Number.isFinite(material.roughness)) {
+                    material.roughness = Math.max(entry.baseRoughness, clampedMinimumRoughness);
+                }
+
+                material.needsUpdate = true;
+            }
         }
 
         setupSectionAnimations(sections);
@@ -286,22 +817,28 @@
         // Hardcoded model keyframes per section.
         // Format: [posX, posY, posZ, rotX, rotY, rotZ]
         const modelKeyframes = [
-            [17, 0, -10, 0, 0, 0],
-            [15, 0, 7, 0, -0.5, 0],
-            [15, 0, 0, 0, -1, 0],
-            [15, -40, 2, 0, -1.5, 0],
-            [15, 0, 0, 0, -2, 0],
-            [15, 0, 0, 0, -2.5, 0],
-            [15, 0, 0, 0, -3, 0],
-            [15, 0, 0, 0, -3.5, 0],
-            [15, 0, 0, 0, -4, 0]
+            [-10.63, 0, -8.66, 0, 0, 0],
+            [2, 0, 35, 0, -0.5, 0],
+            [11, 0, 8, 0, -1, 0],
+            [10, -40, 2, 0, -1.5, 0],
+            [10, 0, 0, 0, -2, 0],
+            [10, 0, 0, 0, -2.5, 0],
+            [10, 0, 0, 0, -3, 0],
+            [10, 0, 0, 0, -3.5, 0],
+            [10, 0, 0, 0, -4, 0],
+            [14, 0.2, -2, 0, -4.4, 0],
+            [9, 0.8, -12, 0, -4.8, 0],
+            [0, 0, -18, 0, -5.2, 0]
         ];
 
         // Per-section pivot offsets.
         // Format: [offsetX, offsetY, offsetZ]
         // Edit these values manually per section.
         const pivotKeyframes = [
-            [2, 0, 0],
+            [0, -0.7, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
             [0, 0, 0],
             [0, 0, 0],
             [0, 0, 0],
@@ -311,6 +848,44 @@
             [0, 0, 0],
             [0, 0, 0]
         ];
+
+        // Per-section light positions.
+        // Format: [lightX, lightY, lightZ]
+        // Edit these values manually per section.
+        const lightKeyframes = [
+            [20, 20, -30],
+            [8, 12, 6],
+            [8, 12, 6],
+            [40, -30, 6],
+            [8, 12, 6],
+            [8, 12, 6],
+            [8, 12, 6],
+            [8, 12, 6],
+            [8, 12, 6],
+            [10, 12, 4],
+            [6, 14, 10],
+            [14, 10, -8]
+        ];
+        function ensureSectionKeyframeCoverage() {
+            const sectionCount = sections.length;
+
+            while (modelKeyframes.length < sectionCount) {
+                const source = modelKeyframes[modelKeyframes.length - 1] || [0, 0, 0, 0, 0, 0];
+                modelKeyframes.push([...source]);
+            }
+
+            while (pivotKeyframes.length < sectionCount) {
+                const source = pivotKeyframes[pivotKeyframes.length - 1] || [defaultPivotOffset.x, defaultPivotOffset.y, defaultPivotOffset.z];
+                pivotKeyframes.push([...source]);
+            }
+
+            while (lightKeyframes.length < sectionCount) {
+                const source = lightKeyframes[lightKeyframes.length - 1] || [defaultLightPoint[0], defaultLightPoint[1], defaultLightPoint[2]];
+                lightKeyframes.push([...source]);
+            }
+        }
+
+        ensureSectionKeyframeCoverage();
 
         function setupSectionAnimations(sectionNodes) {
             sectionNodes.forEach((section) => {
@@ -323,12 +898,10 @@
                         markers: false
                     },
                     opacity: 0.3,
-                    scale: 0.9,
                     ease: 'power2.out'
                 });
             });
         }
-
         function updateDragPointer(event) {
             const rect = renderer.domElement.getBoundingClientRect();
             dragPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -336,10 +909,28 @@
         }
 
         function getCurrentSectionIndex() {
-            const sectionHeight = window.innerHeight || 1;
+            if (!sections.length) {
+                return 0;
+            }
+
             const scrollTop = scrollContainer.scrollTop || 0;
-            const rawIndex = Math.round(scrollTop / sectionHeight);
-            return Math.min(sections.length - 1, Math.max(0, rawIndex));
+            const viewportHeight = scrollContainer.clientHeight || window.innerHeight || 1;
+            const viewportCenter = scrollTop + viewportHeight * 0.5;
+
+            let bestIndex = 0;
+            let bestDistance = Number.POSITIVE_INFINITY;
+
+            for (let i = 0; i < sections.length; i += 1) {
+                const section = sections[i];
+                const sectionCenter = section.offsetTop + section.offsetHeight * 0.5;
+                const distance = Math.abs(sectionCenter - viewportCenter);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestIndex = i;
+                }
+            }
+
+            return bestIndex;
         }
 
         function applyRigPositionToKeyframe(index) {
@@ -348,9 +939,9 @@
             }
 
             const pos = modelRig.position;
-            modelKeyframes[index][0] = parseFloat(pos.x.toFixed(2));
-            modelKeyframes[index][1] = parseFloat(pos.y.toFixed(2));
-            modelKeyframes[index][2] = parseFloat(pos.z.toFixed(2));
+            modelKeyframes[index][0] = pos.x;
+            modelKeyframes[index][1] = pos.y;
+            modelKeyframes[index][2] = pos.z;
         }
 
         function applyRigRotationToKeyframe(index) {
@@ -359,14 +950,574 @@
             }
 
             const rot = modelPivot.rotation;
-            modelKeyframes[index][3] = parseFloat(rot.x.toFixed(2));
-            modelKeyframes[index][4] = parseFloat(rot.y.toFixed(2));
-            modelKeyframes[index][5] = parseFloat(rot.z.toFixed(2));
+            modelKeyframes[index][3] = rot.x;
+            modelKeyframes[index][4] = rot.y;
+            modelKeyframes[index][5] = rot.z;
         }
 
         function applyRigTransformToKeyframe(index) {
             applyRigPositionToKeyframe(index);
             applyRigRotationToKeyframe(index);
+            updateKeyframeEditorInputs();
+        }
+
+        function syncActiveDragTransform() {
+            applyRigPositionToKeyframe(activeSectionIndex);
+            applyRigRotationToKeyframe(activeSectionIndex);
+            updateShadowCatchersPlacement();
+            updateKeyframeEditorInputs();
+        }
+
+        function updateShadowCatchersPlacement() {
+            if (!modelRig || !shadowCatcher) {
+                return;
+            }
+
+            shadowCatcher.position.x = shadowBaseCenter.x - pivotOffset.x;
+            shadowCatcher.position.z = shadowBaseCenter.z - pivotOffset.z;
+            shadowCatcher.position.y = shadowGroundBaseY - pivotOffset.y + fixedShadowSettings.groundOffset;
+
+            if (contactShadowCatcher) {
+                contactShadowCatcher.position.x = shadowCatcher.position.x;
+                contactShadowCatcher.position.z = shadowCatcher.position.z;
+                contactShadowCatcher.position.y = shadowCatcher.position.y + 0.002;
+            }
+        }
+
+        function alignGarageToCar() {
+            if (!garageModel || !model) {
+                return;
+            }
+
+            model.updateMatrixWorld(true);
+            garageModel.updateMatrixWorld(true);
+
+            const carBounds = new THREE.Box3().setFromObject(model);
+            const garageBounds = new THREE.Box3().setFromObject(garageModel);
+            if (!Number.isFinite(carBounds.min.x) || !Number.isFinite(garageBounds.min.x)) {
+                return;
+            }
+
+            const carCenter = carBounds.getCenter(new THREE.Vector3());
+            const garageCenter = garageBounds.getCenter(new THREE.Vector3());
+            const carBottomY = carBounds.min.y;
+            const garageFloorY = garageBounds.min.y;
+
+            garageModel.position.x += (carCenter.x - garageCenter.x) + garagePlacementOffset.x;
+            garageModel.position.y += (carBottomY - garageFloorY) + garagePlacementOffset.y;
+            garageModel.position.z += (carCenter.z - garageCenter.z) + garagePlacementOffset.z;
+            garageModel.updateMatrixWorld(true);
+
+            const updatedGarageBounds = new THREE.Box3().setFromObject(garageModel);
+            if (Number.isFinite(updatedGarageBounds.min.y)) {
+                garageFloorWorldY = updatedGarageBounds.min.y;
+            }
+
+            // Use the real garage floor for contact instead of helper shadow catchers.
+            if (shadowCatcher) {
+                shadowCatcher.visible = false;
+            }
+            if (contactShadowCatcher) {
+                contactShadowCatcher.visible = false;
+            }
+        }
+
+        function enforceCameraAboveGarageGround() {
+            if (!controls || !camera || !Number.isFinite(garageFloorWorldY)) {
+                return;
+            }
+
+            const minimumCameraY = garageFloorWorldY + minimumCameraHeightAboveGarage;
+            if (camera.position.y >= minimumCameraY) {
+                return;
+            }
+
+            orbitOffset.subVectors(camera.position, controls.target);
+            const radius = orbitOffset.length();
+            if (radius <= 0.0001) {
+                camera.position.y = minimumCameraY;
+                return;
+            }
+
+            const minimumOffsetY = minimumCameraY - controls.target.y;
+            if (Math.abs(minimumOffsetY) >= radius) {
+                camera.position.y = minimumCameraY;
+                return;
+            }
+
+            orbitHorizontal.set(orbitOffset.x, 0, orbitOffset.z);
+            if (orbitHorizontal.lengthSq() < 0.000001) {
+                orbitHorizontal.set(1, 0, 0);
+            } else {
+                orbitHorizontal.normalize();
+            }
+
+            const horizontalDistance = Math.sqrt(Math.max(0, radius * radius - minimumOffsetY * minimumOffsetY));
+            camera.position.copy(controls.target).addScaledVector(orbitHorizontal, horizontalDistance);
+            camera.position.y = minimumCameraY;
+        }
+
+        function enforceModelAboveGarageGround() {
+            if (!modelRig || !model || !Number.isFinite(garageFloorWorldY)) {
+                return;
+            }
+
+            model.updateMatrixWorld(true);
+            const modelBounds = new THREE.Box3().setFromObject(model);
+            if (!Number.isFinite(modelBounds.min.y)) {
+                return;
+            }
+
+            const penetration = garageFloorWorldY - modelBounds.min.y;
+            if (penetration > 0) {
+                modelRig.position.y += penetration;
+                model.updateMatrixWorld(true);
+            }
+        }
+
+        function applyNeonPointTubeRotation(neonTube, config) {
+            if (!neonTube || !config) {
+                return;
+            }
+
+            neonTube.rotation.set(0, 0, 0);
+            if (config.orientation === 'x') {
+                neonTube.rotation.z = Math.PI / 2;
+            } else if (config.orientation === 'z') {
+                neonTube.rotation.x = Math.PI / 2;
+            }
+
+            neonTube.rotation.x += Number(config.rotationX) || 0;
+            neonTube.rotation.y += Number(config.rotationY) || 0;
+            neonTube.rotation.z += Number(config.rotationZ) || 0;
+        }
+
+        function setupCyberpunkNeonRig(anchorRoot) {
+            if (cyberpunkNeonSetupDone || !anchorRoot) {
+                return;
+            }
+
+            cyberpunkNeonSetupDone = true;
+            neonPointEntries.length = 0;
+            tubeFixtureEntries.length = 0;
+            neonFlickerLights.length = 0;
+            neonRigGroup = new THREE.Group();
+            anchorRoot.add(neonRigGroup);
+
+            const tubeGeometry = new THREE.CylinderGeometry(0.1, 0.1, 4, 16);
+            const tubeFixtureGeometry = new THREE.CylinderGeometry(0.075, 0.075, 5.8, 20);
+
+            const addNeonPoint = (options) => {
+                const pointLight = new THREE.PointLight(options.color, options.intensity, options.distance, options.decay);
+                pointLight.position.copy(options.position);
+                pointLight.castShadow = true;
+                pointLight.shadow.mapSize.set(1024, 1024);
+                pointLight.shadow.bias = -0.0002;
+                pointLight.shadow.normalBias = 0.01;
+                neonRigGroup.add(pointLight);
+
+                const tubeMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x040404,
+                    emissive: options.color,
+                    emissiveIntensity: options.emissiveIntensity
+                });
+                const neonTube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+                neonTube.position.copy(options.position);
+                applyNeonPointTubeRotation(neonTube, options);
+                neonRigGroup.add(neonTube);
+
+                const flickerState = {
+                    light: pointLight,
+                    baseIntensity: options.intensity,
+                    amplitude: options.flickerAmplitude,
+                    speed: options.flickerSpeed,
+                    phase: options.flickerPhase
+                };
+                neonFlickerLights.push(flickerState);
+
+                const entryId = options.id || `P${neonPointEntries.length + 1}`;
+                neonPointEntries.push({
+                    id: entryId,
+                    type: 'point',
+                    config: options,
+                    pointLight,
+                    neonTube,
+                    flickerState
+                });
+            };
+
+            const addTubeFixture = (options) => {
+                const fixtureGroup = new THREE.Group();
+                fixtureGroup.position.copy(options.position);
+                fixtureGroup.rotation.set(
+                    options.rotationX || 0,
+                    options.rotationY || 0,
+                    options.rotationZ || 0
+                );
+                neonRigGroup.add(fixtureGroup);
+
+                const tubeFixtureMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x070707,
+                    emissive: options.color,
+                    emissiveIntensity: options.emissiveIntensity,
+                    roughness: 0.28,
+                    metalness: 0.18
+                });
+                const tubeFixture = new THREE.Mesh(tubeFixtureGeometry, tubeFixtureMaterial);
+                tubeFixture.rotation.z = Math.PI / 2;
+                fixtureGroup.add(tubeFixture);
+
+                const fillPoint = new THREE.PointLight(options.color, options.intensity, options.distance, 2);
+                fillPoint.position.set(0, 0, 0);
+                fillPoint.castShadow = false;
+                fixtureGroup.add(fillPoint);
+
+                const downSpot = new THREE.SpotLight(
+                    options.color,
+                    options.intensity * 0.48,
+                    options.distance + 8,
+                    Math.PI / 6,
+                    0.45,
+                    2
+                );
+                downSpot.position.set(0, 0.15, 0);
+                downSpot.castShadow = false;
+                fixtureGroup.add(downSpot);
+
+                const downTarget = new THREE.Object3D();
+                downTarget.position.set(0, -4, 0);
+                fixtureGroup.add(downTarget);
+                downSpot.target = downTarget;
+
+                const fillFlicker = {
+                    light: fillPoint,
+                    baseIntensity: options.intensity,
+                    amplitude: options.flickerAmplitude,
+                    speed: options.flickerSpeed,
+                    phase: options.flickerPhase
+                };
+                const spotFlicker = {
+                    light: downSpot,
+                    baseIntensity: options.intensity * 0.48,
+                    amplitude: options.flickerAmplitude * 0.42,
+                    speed: options.flickerSpeed,
+                    phase: options.flickerPhase + 0.7
+                };
+                neonFlickerLights.push(fillFlicker);
+                neonFlickerLights.push(spotFlicker);
+
+                const entryId = options.id || `T${tubeFixtureEntries.length + 1}`;
+                tubeFixtureEntries.push({
+                    id: entryId,
+                    type: 'tube',
+                    config: options,
+                    fixtureGroup,
+                    tubeFixture,
+                    fillPoint,
+                    downSpot,
+                    fillFlicker,
+                    spotFlicker
+                });
+            };
+
+            for (const config of neonPointConfigs) {
+                addNeonPoint(config);
+            }
+
+            for (const config of tubeFixtureConfigs) {
+                addTubeFixture(config);
+            }
+
+            // Keep only the explicitly configured neon entries.
+
+            if (neonDebuggerReady) {
+                updateNeonDebuggerInputs();
+            }
+        }
+
+        function updateCyberpunkNeonRig(elapsedTime) {
+            if (!neonFlickerLights.length) {
+                return;
+            }
+
+            for (const flicker of neonFlickerLights) {
+                const modulation = Math.sin(elapsedTime * flicker.speed + flicker.phase) * flicker.amplitude;
+                flicker.light.intensity = Math.max(0, flicker.baseIntensity + modulation);
+            }
+        }
+
+        function getAllNeonEntries() {
+            return [...neonPointEntries, ...tubeFixtureEntries];
+        }
+
+        function getNeonEntryById(entryId) {
+            return getAllNeonEntries().find((entry) => entry.id === entryId) || null;
+        }
+
+        function applyNeonEntryState(entry) {
+            if (!entry || !entry.config || !entry.config.position) {
+                return;
+            }
+
+            const config = entry.config;
+            const color = Number(config.color) || 0x00ffff;
+            const intensity = Math.max(0, Number(config.intensity) || 0);
+            const distance = Math.max(0, Number(config.distance) || 0);
+            const emissiveIntensity = Math.max(0, Number(config.emissiveIntensity) || 0);
+            const flickerAmplitude = Math.max(0, Number(config.flickerAmplitude) || 0);
+            const flickerSpeed = Math.max(0, Number(config.flickerSpeed) || 0);
+            const flickerPhase = Number(config.flickerPhase) || 0;
+            const rotationX = Number(config.rotationX) || 0;
+            const rotationY = Number(config.rotationY) || 0;
+            const rotationZ = Number(config.rotationZ) || 0;
+
+            if (entry.type === 'point') {
+                if (entry.pointLight) {
+                    entry.pointLight.color.setHex(color);
+                    entry.pointLight.position.copy(config.position);
+                    entry.pointLight.intensity = intensity;
+                    entry.pointLight.distance = distance;
+                    entry.pointLight.decay = Math.max(0, Number(config.decay) || 0);
+                }
+
+                if (entry.neonTube) {
+                    entry.neonTube.position.copy(config.position);
+                    applyNeonPointTubeRotation(entry.neonTube, config);
+
+                    const tubeMaterial = entry.neonTube.material;
+                    if (tubeMaterial && tubeMaterial.emissive) {
+                        tubeMaterial.emissive.setHex(color);
+                        tubeMaterial.emissiveIntensity = emissiveIntensity;
+                        tubeMaterial.needsUpdate = true;
+                    }
+                }
+
+                if (entry.flickerState) {
+                    entry.flickerState.baseIntensity = intensity;
+                    entry.flickerState.amplitude = flickerAmplitude;
+                    entry.flickerState.speed = flickerSpeed;
+                    entry.flickerState.phase = flickerPhase;
+                }
+
+                return;
+            }
+
+            if (entry.fixtureGroup) {
+                entry.fixtureGroup.position.copy(config.position);
+                entry.fixtureGroup.rotation.set(rotationX, rotationY, rotationZ);
+            }
+
+            if (entry.tubeFixture) {
+                const fixtureMaterial = entry.tubeFixture.material;
+                if (fixtureMaterial && fixtureMaterial.emissive) {
+                    fixtureMaterial.emissive.setHex(color);
+                    fixtureMaterial.emissiveIntensity = emissiveIntensity;
+                    fixtureMaterial.needsUpdate = true;
+                }
+            }
+
+            if (entry.fillPoint) {
+                entry.fillPoint.color.setHex(color);
+                entry.fillPoint.intensity = intensity;
+                entry.fillPoint.distance = distance;
+                entry.fillPoint.decay = 2;
+            }
+
+            if (entry.downSpot) {
+                entry.downSpot.color.setHex(color);
+                entry.downSpot.intensity = intensity * 0.48;
+                entry.downSpot.distance = distance + 8;
+                entry.downSpot.decay = 2;
+            }
+
+            if (entry.fillFlicker) {
+                entry.fillFlicker.baseIntensity = intensity;
+                entry.fillFlicker.amplitude = flickerAmplitude;
+                entry.fillFlicker.speed = flickerSpeed;
+                entry.fillFlicker.phase = flickerPhase;
+            }
+
+            if (entry.spotFlicker) {
+                entry.spotFlicker.baseIntensity = intensity * 0.48;
+                entry.spotFlicker.amplitude = flickerAmplitude * 0.42;
+                entry.spotFlicker.speed = flickerSpeed;
+                entry.spotFlicker.phase = flickerPhase + 0.7;
+            }
+        }
+
+        function updateNeonDebuggerInputs() {
+            const targetSelect = document.getElementById('neon-target');
+            const inputX = document.getElementById('neon-x');
+            const inputY = document.getElementById('neon-y');
+            const inputZ = document.getElementById('neon-z');
+            const inputIntensity = document.getElementById('neon-intensity');
+            const inputDistance = document.getElementById('neon-distance');
+            const inputEmissive = document.getElementById('neon-emissive');
+            const inputAmp = document.getElementById('neon-amp');
+            const inputSpeed = document.getElementById('neon-speed');
+            const inputPhase = document.getElementById('neon-phase');
+            const inputRotationX = document.getElementById('neon-rx');
+            const inputRotationY = document.getElementById('neon-ry');
+            const inputRotationZ = document.getElementById('neon-rz');
+
+            if (
+                !targetSelect
+                || !inputX || !inputY || !inputZ
+                || !inputIntensity || !inputDistance || !inputEmissive
+                || !inputAmp || !inputSpeed || !inputPhase
+                || !inputRotationX || !inputRotationY || !inputRotationZ
+            ) {
+                return;
+            }
+
+            const entries = getAllNeonEntries();
+            if (!entries.length) {
+                targetSelect.innerHTML = '';
+                return;
+            }
+
+            const needsOptionRefresh = targetSelect.options.length !== entries.length
+                || entries.some((entry, index) => {
+                    const option = targetSelect.options[index];
+                    return !option || option.value !== entry.id;
+                });
+
+            if (needsOptionRefresh) {
+                targetSelect.innerHTML = '';
+                for (const entry of entries) {
+                    const option = document.createElement('option');
+                    option.value = entry.id;
+                    option.textContent = entry.id;
+                    targetSelect.appendChild(option);
+                }
+            }
+
+            if (!entries.some((entry) => entry.id === activeNeonTargetId)) {
+                activeNeonTargetId = entries[0].id;
+            }
+
+            if (targetSelect.value !== activeNeonTargetId) {
+                targetSelect.value = activeNeonTargetId;
+            }
+
+            const activeEntry = getNeonEntryById(activeNeonTargetId);
+            if (!activeEntry || !activeEntry.config || !activeEntry.config.position) {
+                return;
+            }
+
+            const setIfIdle = (input, value, digits = 2) => {
+                if (document.activeElement === input) {
+                    return;
+                }
+                input.value = Number(value).toFixed(digits);
+            };
+
+            setIfIdle(inputX, activeEntry.config.position.x, 2);
+            setIfIdle(inputY, activeEntry.config.position.y, 2);
+            setIfIdle(inputZ, activeEntry.config.position.z, 2);
+            setIfIdle(inputIntensity, activeEntry.config.intensity, 2);
+            setIfIdle(inputDistance, activeEntry.config.distance, 2);
+            setIfIdle(inputEmissive, activeEntry.config.emissiveIntensity, 2);
+            setIfIdle(inputAmp, activeEntry.config.flickerAmplitude, 2);
+            setIfIdle(inputSpeed, activeEntry.config.flickerSpeed, 2);
+            setIfIdle(inputPhase, activeEntry.config.flickerPhase, 2);
+            setIfIdle(inputRotationX, activeEntry.config.rotationX || 0, 2);
+            setIfIdle(inputRotationY, activeEntry.config.rotationY || 0, 2);
+            setIfIdle(inputRotationZ, activeEntry.config.rotationZ || 0, 2);
+        }
+
+        function setupNeonDebuggerControls() {
+            if (neonDebuggerReady) {
+                return;
+            }
+
+            const targetSelect = document.getElementById('neon-target');
+            const inputX = document.getElementById('neon-x');
+            const inputY = document.getElementById('neon-y');
+            const inputZ = document.getElementById('neon-z');
+            const inputIntensity = document.getElementById('neon-intensity');
+            const inputDistance = document.getElementById('neon-distance');
+            const inputEmissive = document.getElementById('neon-emissive');
+            const inputAmp = document.getElementById('neon-amp');
+            const inputSpeed = document.getElementById('neon-speed');
+            const inputPhase = document.getElementById('neon-phase');
+            const inputRotationX = document.getElementById('neon-rx');
+            const inputRotationY = document.getElementById('neon-ry');
+            const inputRotationZ = document.getElementById('neon-rz');
+
+            if (
+                !targetSelect
+                || !inputX || !inputY || !inputZ
+                || !inputIntensity || !inputDistance || !inputEmissive
+                || !inputAmp || !inputSpeed || !inputPhase
+                || !inputRotationX || !inputRotationY || !inputRotationZ
+            ) {
+                return;
+            }
+
+            neonDebuggerReady = true;
+
+            const applyInputsToActiveEntry = () => {
+                const activeEntry = getNeonEntryById(activeNeonTargetId);
+                if (!activeEntry || !activeEntry.config || !activeEntry.config.position) {
+                    return;
+                }
+
+                const parseOrCurrent = (input, currentValue, clampMin = null) => {
+                    const parsed = parseFloat(input.value);
+                    if (!Number.isFinite(parsed)) {
+                        return currentValue;
+                    }
+
+                    if (clampMin === null) {
+                        return parsed;
+                    }
+
+                    return Math.max(clampMin, parsed);
+                };
+
+                activeEntry.config.position.set(
+                    parseOrCurrent(inputX, activeEntry.config.position.x),
+                    parseOrCurrent(inputY, activeEntry.config.position.y),
+                    parseOrCurrent(inputZ, activeEntry.config.position.z)
+                );
+                activeEntry.config.intensity = parseOrCurrent(inputIntensity, activeEntry.config.intensity, 0);
+                activeEntry.config.distance = parseOrCurrent(inputDistance, activeEntry.config.distance, 0);
+                activeEntry.config.emissiveIntensity = parseOrCurrent(inputEmissive, activeEntry.config.emissiveIntensity, 0);
+                activeEntry.config.flickerAmplitude = parseOrCurrent(inputAmp, activeEntry.config.flickerAmplitude, 0);
+                activeEntry.config.flickerSpeed = parseOrCurrent(inputSpeed, activeEntry.config.flickerSpeed, 0);
+                activeEntry.config.flickerPhase = parseOrCurrent(inputPhase, activeEntry.config.flickerPhase);
+                activeEntry.config.rotationX = parseOrCurrent(inputRotationX, activeEntry.config.rotationX || 0);
+                activeEntry.config.rotationY = parseOrCurrent(inputRotationY, activeEntry.config.rotationY || 0);
+                activeEntry.config.rotationZ = parseOrCurrent(inputRotationZ, activeEntry.config.rotationZ || 0);
+
+                applyNeonEntryState(activeEntry);
+            };
+
+            targetSelect.addEventListener('change', () => {
+                activeNeonTargetId = targetSelect.value;
+                updateNeonDebuggerInputs();
+            });
+
+            const bindLiveInput = (input) => {
+                input.addEventListener('input', applyInputsToActiveEntry);
+                input.addEventListener('change', applyInputsToActiveEntry);
+            };
+
+            bindLiveInput(inputX);
+            bindLiveInput(inputY);
+            bindLiveInput(inputZ);
+            bindLiveInput(inputIntensity);
+            bindLiveInput(inputDistance);
+            bindLiveInput(inputEmissive);
+            bindLiveInput(inputAmp);
+            bindLiveInput(inputSpeed);
+            bindLiveInput(inputPhase);
+            bindLiveInput(inputRotationX);
+            bindLiveInput(inputRotationY);
+            bindLiveInput(inputRotationZ);
+
+            updateNeonDebuggerInputs();
         }
 
         function applyPivotOffset() {
@@ -375,7 +1526,7 @@
             }
 
             model.position.copy(modelBasePosition).sub(pivotOffset);
-            updatePivotDebugInfo();
+            updateShadowCatchersPlacement();
         }
 
         function getPivotKeyframe(index) {
@@ -412,6 +1563,1799 @@
             pivotKeyframes[index][2] = parseFloat(pivotOffset.z.toFixed(2));
         }
 
+        function getLightKeyframe(index) {
+            const keyframe = lightKeyframes[index];
+
+            if (Array.isArray(keyframe) && keyframe.length >= 3) {
+                return keyframe;
+            }
+
+            return [defaultLightPoint[0], defaultLightPoint[1], defaultLightPoint[2]];
+        }
+
+        function applyLightFromKeyframe(index) {
+            const [lightX, lightY, lightZ] = getLightKeyframe(index);
+
+            if (keyLight) {
+                keyLight.position.set(lightX, lightY, lightZ);
+                keyLight.intensity = fixedShadowSettings.intensity;
+                keyLight.color.setRGB(
+                    defaultMoonLightColor[0],
+                    defaultMoonLightColor[1],
+                    defaultMoonLightColor[2]
+                );
+                keyLight.shadow.radius = defaultShadowRadius;
+                keyLight.shadow.needsUpdate = true;
+            }
+
+            if (rimLight) {
+                rimLight.position.set(
+                    defaultRimLightPoint[0],
+                    defaultRimLightPoint[1],
+                    defaultRimLightPoint[2]
+                );
+                rimLight.intensity = defaultRimLightIntensity;
+                rimLight.color.setRGB(
+                    defaultRimLightColor[0],
+                    defaultRimLightColor[1],
+                    defaultRimLightColor[2]
+                );
+            }
+
+            if (ambientLight) {
+                ambientLight.color.setRGB(
+                    defaultAmbientLightColor[0],
+                    defaultAmbientLightColor[1],
+                    defaultAmbientLightColor[2]
+                );
+                ambientLight.intensity = defaultAmbientLightIntensity;
+            }
+
+            if (fillLight) {
+                fillLight.color.setRGB(
+                    defaultFillLightColor[0],
+                    defaultFillLightColor[1],
+                    defaultFillLightColor[2]
+                );
+                fillLight.groundColor.setRGB(
+                    defaultFillGroundColor[0],
+                    defaultFillGroundColor[1],
+                    defaultFillGroundColor[2]
+                );
+                fillLight.intensity = defaultFillLightIntensity;
+            }
+
+            if (shadowMaterial) {
+                shadowMaterial.color.setRGB(
+                    defaultShadowColor[0],
+                    defaultShadowColor[1],
+                    defaultShadowColor[2]
+                );
+                shadowMaterial.opacity = defaultShadowOpacity;
+                shadowMaterial.needsUpdate = true;
+            }
+
+            if (contactShadowMaterial) {
+                contactShadowMaterial.color.setRGB(
+                    defaultShadowColor[0],
+                    defaultShadowColor[1],
+                    defaultShadowColor[2]
+                );
+                contactShadowMaterial.opacity = defaultContactShadowOpacity;
+                contactShadowMaterial.needsUpdate = true;
+            }
+
+            if (scene) {
+                if (!(scene.fog && scene.fog.isFogExp2)) {
+                    scene.fog = new THREE.FogExp2(0x02020a, defaultFogDensity);
+                }
+
+                scene.fog.color.setRGB(
+                    defaultFogColor[0],
+                    defaultFogColor[1],
+                    defaultFogColor[2]
+                );
+                scene.fog.density = defaultFogDensity;
+            }
+
+            if (bloomPass) {
+                bloomPass.strength = defaultBloomStrength;
+                bloomPass.threshold = defaultBloomThreshold;
+                bloomPass.radius = defaultBloomRadius;
+            }
+
+            applyEnvironmentPreset('neutral');
+            applyMaterialSurfaceLook(defaultEnvironmentIntensityScale, defaultMinimumRoughness, true);
+        }
+
+        function applyLightToKeyframe(index, lightX, lightY, lightZ) {
+            if (!lightKeyframes[index]) {
+                lightKeyframes[index] = [defaultLightPoint[0], defaultLightPoint[1], defaultLightPoint[2]];
+            }
+
+            lightKeyframes[index][0] = parseFloat(lightX.toFixed(2));
+            lightKeyframes[index][1] = parseFloat(lightY.toFixed(2));
+            lightKeyframes[index][2] = parseFloat(lightZ.toFixed(2));
+        }
+
+        function getNodeHierarchyLabel(node, maxDepth = 6) {
+            const labels = [];
+            let current = node;
+            let depth = 0;
+
+            while (current && depth < maxDepth) {
+                if (current.name) {
+                    labels.push(current.name);
+                }
+
+                current = current.parent;
+                depth += 1;
+            }
+
+            return labels.join(' ').toLowerCase();
+        }
+
+        function getNodeDepth(node) {
+            let depth = 0;
+            let current = node;
+
+            while (current && current.parent) {
+                depth += 1;
+                current = current.parent;
+            }
+
+            return depth;
+        }
+
+        function isAncestorNode(ancestorNode, targetNode) {
+            if (!ancestorNode || !targetNode) {
+                return false;
+            }
+
+            let current = targetNode.parent;
+            while (current) {
+                if (current === ancestorNode) {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
+        function analyzePorscheModel(root, gltf) {
+            if (!root) {
+                return;
+            }
+
+            let nodeCount = 0;
+            let meshCount = 0;
+            let skinnedMeshCount = 0;
+            let boneCount = 0;
+            let triangleCount = 0;
+            const materialIds = new Set();
+            const meshRows = [];
+            const namedRows = [];
+
+            root.updateMatrixWorld(true);
+            root.traverse((node) => {
+                nodeCount += 1;
+
+                if (node.isBone) {
+                    boneCount += 1;
+                }
+
+                if (node.name) {
+                    namedRows.push({
+                        name: node.name,
+                        type: node.type,
+                        childCount: node.children ? node.children.length : 0
+                    });
+                }
+
+                if (!node.isMesh || !node.geometry) {
+                    return;
+                }
+
+                meshCount += 1;
+                if (node.isSkinnedMesh) {
+                    skinnedMeshCount += 1;
+                }
+
+                const geometry = node.geometry;
+                const triangleEstimate = geometry.index
+                    ? geometry.index.count / 3
+                    : (geometry.attributes.position ? geometry.attributes.position.count / 3 : 0);
+                triangleCount += triangleEstimate;
+
+                const materials = Array.isArray(node.material) ? node.material : [node.material];
+                for (const material of materials) {
+                    if (material && material.uuid) {
+                        materialIds.add(material.uuid);
+                    }
+                }
+
+                const bounds = new THREE.Box3().setFromObject(node);
+                const size = bounds.getSize(new THREE.Vector3());
+                meshRows.push({
+                    name: node.name || '(unnamed)',
+                    type: node.type,
+                    triangles: Math.round(triangleEstimate),
+                    sizeX: Number(size.x.toFixed(2)),
+                    sizeY: Number(size.y.toFixed(2)),
+                    sizeZ: Number(size.z.toFixed(2)),
+                    skinned: node.isSkinnedMesh ? 'yes' : 'no'
+                });
+            });
+
+            meshRows.sort((a, b) => b.triangles - a.triangles);
+
+            console.groupCollapsed('Porsche GLB deep analysis');
+            console.log('Summary', {
+                nodeCount,
+                meshCount,
+                skinnedMeshCount,
+                boneCount,
+                materialCount: materialIds.size,
+                triangleCount: Math.round(triangleCount),
+                animationCount: Array.isArray(gltf && gltf.animations) ? gltf.animations.length : 0
+            });
+            console.table(meshRows.slice(0, 20));
+            console.table(namedRows.slice(0, 80));
+            console.groupEnd();
+        }
+
+        function analyzeAndRigDoors(root) {
+            doorRigs.length = 0;
+            doorAnalysisRows.length = 0;
+            doorOpenDirectionMultiplier = 1;
+
+            if (!root) {
+                updateDoorDebugInfo();
+                return;
+            }
+
+            root.updateMatrixWorld(true);
+
+            const modelBounds = new THREE.Box3().setFromObject(root);
+            if (!Number.isFinite(modelBounds.min.x)) {
+                updateDoorDebugInfo();
+                return;
+            }
+
+            const modelCenter = modelBounds.getCenter(new THREE.Vector3());
+            const modelSize = modelBounds.getSize(new THREE.Vector3());
+            const modelScale = Math.max(modelSize.x, modelSize.y, modelSize.z);
+            const lateralAxis = modelSize.x <= modelSize.z ? 'x' : 'z';
+            const longitudinalAxis = lateralAxis === 'x' ? 'z' : 'x';
+            const frontDirectionSign = -1;
+            const minDoorWidth = modelScale * 0.06;
+            const minDoorHeight = modelScale * 0.06;
+            const candidates = [];
+            const consumedManualNodes = new Set();
+            const nodeLookupByName = new Map();
+            const pivotMarkerRadius = Math.max(0.025, modelScale * 0.0065);
+            const pivotMarkerGeometry = new THREE.SphereGeometry(pivotMarkerRadius, 16, 12);
+
+            root.traverse((node) => {
+                if (!node || !node.name) {
+                    return;
+                }
+
+                const key = node.name.toLowerCase();
+                if (!nodeLookupByName.has(key)) {
+                    nodeLookupByName.set(key, []);
+                }
+
+                nodeLookupByName.get(key).push(node);
+            });
+
+            const createDoorPivotMarker = (markerColor) => {
+                const markerMaterial = new THREE.MeshBasicMaterial({
+                    color: markerColor,
+                    transparent: true,
+                    opacity: 0.95,
+                    depthTest: false,
+                    depthWrite: false
+                });
+                const marker = new THREE.Mesh(pivotMarkerGeometry, markerMaterial);
+                marker.visible = doorPivotMarkersVisible;
+                marker.renderOrder = 10000;
+                return marker;
+            };
+
+            const getUniqueTopLevelNodes = (nodes) => {
+                const uniqueNodes = [];
+                const seenIds = new Set();
+
+                for (const node of nodes) {
+                    if (!node || seenIds.has(node.uuid)) {
+                        continue;
+                    }
+
+                    seenIds.add(node.uuid);
+                    uniqueNodes.push(node);
+                }
+
+                return uniqueNodes.filter((node) =>
+                    !uniqueNodes.some((otherNode) => otherNode !== node && isAncestorNode(otherNode, node))
+                );
+            };
+
+            const classifyDoorSideAndSegment = (bounds, label = '') => {
+                const center = bounds.getCenter(new THREE.Vector3());
+                const sideValue = center[lateralAxis] - modelCenter[lateralAxis];
+                let side = sideValue >= 0 ? 'left' : 'right';
+                if (doorSideRightPattern.test(label)) {
+                    side = 'right';
+                } else if (doorSideLeftPattern.test(label)) {
+                    side = 'left';
+                }
+
+                const longitudinalValue = center[longitudinalAxis] - modelCenter[longitudinalAxis];
+                let segment = longitudinalValue <= 0 ? 'front' : 'rear';
+                if (doorFrontPattern.test(label)) {
+                    segment = 'front';
+                } else if (doorRearPattern.test(label)) {
+                    segment = 'rear';
+                }
+
+                return { side, segment, center };
+            };
+
+            const createDoorRigFromNodes = (nodes, source, nameLabel = '', options = {}) => {
+                const attachNodes = getUniqueTopLevelNodes(nodes);
+                if (!attachNodes.length) {
+                    return null;
+                }
+
+                const combinedBounds = new THREE.Box3();
+                let hasBounds = false;
+                for (const node of attachNodes) {
+                    const nodeBounds = new THREE.Box3().setFromObject(node);
+                    if (!Number.isFinite(nodeBounds.min.x)) {
+                        continue;
+                    }
+
+                    if (!hasBounds) {
+                        combinedBounds.copy(nodeBounds);
+                        hasBounds = true;
+                    } else {
+                        combinedBounds.union(nodeBounds);
+                    }
+                }
+
+                if (!hasBounds) {
+                    return null;
+                }
+
+                const size = combinedBounds.getSize(new THREE.Vector3());
+                if (size.y < minDoorHeight || (size.x < minDoorWidth && size.z < minDoorWidth)) {
+                    return null;
+                }
+
+                const combinedLabel = attachNodes.map((node) => node.name || '').join(' ').toLowerCase();
+                const { side, segment, center } = classifyDoorSideAndSegment(combinedBounds, combinedLabel);
+
+                const lateralSize = lateralAxis === 'x' ? size.x : size.z;
+                const longSize = longitudinalAxis === 'x' ? size.x : size.z;
+                const hingeWorld = center.clone();
+                const hardcodedPivotWorld = Array.isArray(options.pivotWorld)
+                    ? options.pivotWorld
+                    : null;
+                if (hardcodedPivotWorld && hardcodedPivotWorld.length >= 3) {
+                    hingeWorld.set(
+                        Number(hardcodedPivotWorld[0]) || center.x,
+                        Number(hardcodedPivotWorld[1]) || center.y,
+                        Number(hardcodedPivotWorld[2]) || center.z
+                    );
+                } else if (lateralAxis === 'x') {
+                    hingeWorld.x = center.x + (side === 'left' ? lateralSize * 0.5 : -lateralSize * 0.5);
+                    hingeWorld.z = center.z + frontDirectionSign * longSize * 0.45;
+                } else {
+                    hingeWorld.z = center.z + (side === 'left' ? lateralSize * 0.5 : -lateralSize * 0.5);
+                    hingeWorld.x = center.x + frontDirectionSign * longSize * 0.45;
+                }
+
+                const hingeLocal = root.worldToLocal(hingeWorld.clone());
+                const doorPivot = new THREE.Group();
+                doorPivot.position.copy(hingeLocal);
+                root.add(doorPivot);
+
+                for (const node of attachNodes) {
+                    doorPivot.attach(node);
+                    node.traverse((childNode) => {
+                        consumedManualNodes.add(childNode.uuid);
+                    });
+                }
+
+                const closedRotationY = doorPivot.rotation.y;
+                const openingDirection = (side === 'left' ? 1 : -1) * doorOpenDirectionMultiplier;
+                const openRotationY = closedRotationY + openingDirection * doorOpenAngle;
+                const name = nameLabel || attachNodes.map((node) => node.name || '(unnamed)').join('+');
+                const markerColor = typeof options.markerColor === 'number'
+                    ? options.markerColor
+                    : doorPivotMarkerColors[doorRigs.length % doorPivotMarkerColors.length];
+                const pivotMarker = createDoorPivotMarker(markerColor);
+                doorPivot.add(pivotMarker);
+
+                const doorRig = {
+                    node: attachNodes[0],
+                    pivot: doorPivot,
+                    pivotMarker,
+                    markerColor,
+                    name,
+                    side,
+                    segment,
+                    source,
+                    openingDirection,
+                    closedRotationY,
+                    openRotationY,
+                    manualDoorGroupIndex: Number.isInteger(options.manualDoorGroupIndex)
+                        ? options.manualDoorGroupIndex
+                        : null,
+                    currentRotationY: closedRotationY,
+                    targetRotationY: closedRotationY
+                };
+
+                doorRigs.push(doorRig);
+                doorAnalysisRows.push({
+                    name,
+                    side,
+                    segment,
+                    source,
+                    score: 999,
+                    sizeX: Number(size.x.toFixed(2)),
+                    sizeY: Number(size.y.toFixed(2)),
+                    sizeZ: Number(size.z.toFixed(2))
+                });
+
+                return doorRig;
+            };
+
+            let manualGroupRiggedCount = 0;
+            for (let groupIndex = 0; groupIndex < manualDoorGroupNodeNames.length; groupIndex += 1) {
+                const groupNames = manualDoorGroupNodeNames[groupIndex];
+                if (!Array.isArray(groupNames) || !groupNames.length) {
+                    continue;
+                }
+
+                const resolvedNodes = [];
+                for (const rawName of groupNames) {
+                    const targetName = String(rawName || '').trim();
+                    if (!targetName) {
+                        continue;
+                    }
+
+                    const targetKey = targetName.toLowerCase();
+                    const exactNodes = nodeLookupByName.get(targetKey) || [];
+                    if (exactNodes.length) {
+                        resolvedNodes.push(exactNodes.find((node) => node.isMesh) || exactNodes[0]);
+                        continue;
+                    }
+
+                    let fuzzyNodes = [];
+                    for (const [lookupKey, lookupNodes] of nodeLookupByName.entries()) {
+                        if (
+                            lookupKey === targetKey
+                            || lookupKey.startsWith(`${targetKey}_`)
+                            || lookupKey.includes(targetKey)
+                        ) {
+                            fuzzyNodes = fuzzyNodes.concat(lookupNodes);
+                        }
+                    }
+
+                    if (fuzzyNodes.length) {
+                        resolvedNodes.push(fuzzyNodes.find((node) => node.isMesh) || fuzzyNodes[0]);
+                    }
+                }
+
+                const manualDoorRig = createDoorRigFromNodes(
+                    resolvedNodes,
+                    'manual',
+                    `manual-door-${groupIndex + 1}`,
+                    {
+                        pivotWorld: manualDoorGroupPivotWorldPoints[groupIndex] || null,
+                        markerColor: doorPivotMarkerColors[groupIndex % doorPivotMarkerColors.length],
+                        manualDoorGroupIndex: groupIndex
+                    }
+                );
+                if (manualDoorRig) {
+                    manualGroupRiggedCount += 1;
+                }
+            }
+
+            const addCandidate = (node, source, baseScore) => {
+                const bounds = new THREE.Box3().setFromObject(node);
+                if (!Number.isFinite(bounds.min.x)) {
+                    return;
+                }
+
+                const size = bounds.getSize(new THREE.Vector3());
+                if (size.y < minDoorHeight || (size.x < minDoorWidth && size.z < minDoorWidth)) {
+                    return;
+                }
+
+                const center = bounds.getCenter(new THREE.Vector3());
+                const label = getNodeHierarchyLabel(node);
+                const sideValue = center[lateralAxis] - modelCenter[lateralAxis];
+                let side = sideValue >= 0 ? 'left' : 'right';
+                if (doorSideRightPattern.test(label)) {
+                    side = 'right';
+                } else if (doorSideLeftPattern.test(label)) {
+                    side = 'left';
+                }
+
+                const longitudinalValue = center[longitudinalAxis] - modelCenter[longitudinalAxis];
+                let segment = longitudinalValue <= 0 ? 'front' : 'rear';
+                if (doorFrontPattern.test(label)) {
+                    segment = 'front';
+                } else if (doorRearPattern.test(label)) {
+                    segment = 'rear';
+                }
+
+                let score = baseScore;
+                if (doorSideLeftPattern.test(label) || doorSideRightPattern.test(label)) {
+                    score += 2;
+                }
+
+                if (doorFrontPattern.test(label) || doorRearPattern.test(label)) {
+                    score += 1;
+                }
+
+                if (node.isBone) {
+                    score += 3;
+                }
+
+                if (!node.isMesh) {
+                    score += 1;
+                }
+
+                if (doorIgnorePattern.test(label)) {
+                    score -= 2;
+                }
+
+                const lateralSize = lateralAxis === 'x' ? size.x : size.z;
+                const longSize = longitudinalAxis === 'x' ? size.x : size.z;
+                const sideDistance = Math.abs(sideValue);
+                score += Math.min(2.5, sideDistance / Math.max(0.001, (lateralAxis === 'x' ? modelSize.x : modelSize.z) * 0.4));
+                score += Math.min(2, (Math.max(lateralSize, longSize) / Math.max(0.001, modelScale * 0.2)));
+
+                candidates.push({
+                    node,
+                    name: node.name || '(unnamed)',
+                    side,
+                    segment,
+                    score,
+                    size,
+                    center,
+                    source,
+                    depth: getNodeDepth(node)
+                });
+            };
+
+            root.traverse((node) => {
+                if (!node || node === root || !node.name) {
+                    return;
+                }
+
+                if (consumedManualNodes.has(node.uuid)) {
+                    return;
+                }
+
+                const label = getNodeHierarchyLabel(node);
+                if (!doorNamePattern.test(label)) {
+                    return;
+                }
+                addCandidate(node, 'named', 10);
+            });
+
+            if (!candidates.length) {
+                root.traverse((node) => {
+                    if (!node || !node.isMesh || !node.geometry) {
+                        return;
+                    }
+
+                    if (consumedManualNodes.has(node.uuid)) {
+                        return;
+                    }
+
+                    const bounds = new THREE.Box3().setFromObject(node);
+                    if (!Number.isFinite(bounds.min.x)) {
+                        return;
+                    }
+
+                    const size = bounds.getSize(new THREE.Vector3());
+                    const center = bounds.getCenter(new THREE.Vector3());
+                    const lateralSize = lateralAxis === 'x' ? size.x : size.z;
+                    const longSize = longitudinalAxis === 'x' ? size.x : size.z;
+                    const lateralDistance = Math.abs(center[lateralAxis] - modelCenter[lateralAxis]);
+                    const minLateralDistance = (lateralAxis === 'x' ? modelSize.x : modelSize.z) * 0.18;
+
+                    if (lateralDistance < minLateralDistance) {
+                        return;
+                    }
+
+                    if (size.y < modelScale * 0.05 || size.y > modelScale * 0.8) {
+                        return;
+                    }
+
+                    if (Math.max(lateralSize, longSize) < modelScale * 0.05) {
+                        return;
+                    }
+
+                    if (center.y < modelBounds.min.y + modelSize.y * 0.15 || center.y > modelBounds.min.y + modelSize.y * 0.92) {
+                        return;
+                    }
+
+                    addCandidate(node, 'geometric', 5);
+                });
+            }
+
+            candidates.sort((a, b) => {
+                if (Math.abs(b.score - a.score) > 0.0001) {
+                    return b.score - a.score;
+                }
+
+                if (a.depth !== b.depth) {
+                    return a.depth - b.depth;
+                }
+
+                const volumeA = a.size.x * a.size.y * a.size.z;
+                const volumeB = b.size.x * b.size.y * b.size.z;
+                return volumeB - volumeA;
+            });
+
+            const selected = [];
+            const maxAutoDoors = Math.max(0, 4 - doorRigs.length);
+            const selectedSlots = new Set(doorRigs.map((door) => `${door.side}-${door.segment}`));
+            for (const candidate of candidates) {
+                if (selected.length >= maxAutoDoors) {
+                    break;
+                }
+
+                const slotId = `${candidate.side}-${candidate.segment}`;
+                if (selectedSlots.has(slotId)) {
+                    continue;
+                }
+
+                const conflicts = selected.some((entry) =>
+                    isAncestorNode(entry.node, candidate.node)
+                    || isAncestorNode(candidate.node, entry.node)
+                );
+                if (conflicts) {
+                    continue;
+                }
+
+                selectedSlots.add(slotId);
+                selected.push(candidate);
+            }
+
+            if (!selected.length) {
+                const selectedSides = new Set();
+                for (const candidate of candidates) {
+                    if (selected.length >= Math.max(1, maxAutoDoors)) {
+                        break;
+                    }
+
+                    if (selectedSides.has(candidate.side)) {
+                        continue;
+                    }
+
+                    const conflicts = selected.some((entry) =>
+                        isAncestorNode(entry.node, candidate.node)
+                        || isAncestorNode(candidate.node, entry.node)
+                    );
+                    if (conflicts) {
+                        continue;
+                    }
+
+                    selectedSides.add(candidate.side);
+                    selected.push(candidate);
+                }
+            }
+
+            for (const candidate of selected) {
+                const targetNode = candidate.node;
+                const parentNode = targetNode.parent;
+                if (!parentNode) {
+                    continue;
+                }
+
+                const bounds = new THREE.Box3().setFromObject(targetNode);
+                if (!Number.isFinite(bounds.min.x)) {
+                    continue;
+                }
+
+                const center = bounds.getCenter(new THREE.Vector3());
+                const size = bounds.getSize(new THREE.Vector3());
+                const lateralSize = lateralAxis === 'x' ? size.x : size.z;
+                const longSize = longitudinalAxis === 'x' ? size.x : size.z;
+                const hingeWorld = center.clone();
+
+                if (lateralAxis === 'x') {
+                    hingeWorld.x = center.x + (candidate.side === 'left' ? lateralSize * 0.5 : -lateralSize * 0.5);
+                    hingeWorld.z = center.z + frontDirectionSign * longSize * 0.45;
+                } else {
+                    hingeWorld.z = center.z + (candidate.side === 'left' ? lateralSize * 0.5 : -lateralSize * 0.5);
+                    hingeWorld.x = center.x + frontDirectionSign * longSize * 0.45;
+                }
+
+                const hingeLocal = parentNode.worldToLocal(hingeWorld.clone());
+                const doorPivot = new THREE.Group();
+                doorPivot.position.copy(hingeLocal);
+                parentNode.add(doorPivot);
+                doorPivot.attach(targetNode);
+
+                const markerColor = doorPivotMarkerColors[doorRigs.length % doorPivotMarkerColors.length];
+                const pivotMarker = createDoorPivotMarker(markerColor);
+                doorPivot.add(pivotMarker);
+
+                const closedRotationY = doorPivot.rotation.y;
+                const openingDirection = (candidate.side === 'left' ? 1 : -1) * doorOpenDirectionMultiplier;
+                const openRotationY = closedRotationY + openingDirection * doorOpenAngle;
+
+                doorRigs.push({
+                    node: targetNode,
+                    pivot: doorPivot,
+                    pivotMarker,
+                    markerColor,
+                    name: candidate.name,
+                    side: candidate.side,
+                    segment: candidate.segment,
+                    source: candidate.source,
+                    openingDirection,
+                    closedRotationY,
+                    openRotationY,
+                    currentRotationY: closedRotationY,
+                    targetRotationY: closedRotationY
+                });
+            }
+
+            for (const candidate of candidates.slice(0, 30)) {
+                doorAnalysisRows.push({
+                    name: candidate.name,
+                    side: candidate.side,
+                    segment: candidate.segment,
+                    source: candidate.source,
+                    score: Number(candidate.score.toFixed(2)),
+                    sizeX: Number(candidate.size.x.toFixed(2)),
+                    sizeY: Number(candidate.size.y.toFixed(2)),
+                    sizeZ: Number(candidate.size.z.toFixed(2))
+                });
+            }
+
+            console.groupCollapsed('Porsche GLB door analysis');
+            console.log('Door summary', {
+                candidateCount: candidates.length,
+                manualGroupRiggedCount,
+                autoRiggedDoorCount: Math.max(0, doorRigs.length - manualGroupRiggedCount),
+                riggedDoorCount: doorRigs.length
+            });
+            console.table(doorAnalysisRows);
+            console.table(doorRigs.map((door) => ({
+                name: door.name,
+                side: door.side,
+                segment: door.segment,
+                source: door.source,
+                closedRotationY: Number(door.closedRotationY.toFixed(3)),
+                openRotationY: Number(door.openRotationY.toFixed(3))
+            })));
+            console.groupEnd();
+
+            setDoorPivotMarkerVisibility(doorPivotMarkersVisible);
+            updateDoorDebugInfo();
+        }
+
+        function setDoorPivotMarkerVisibility(visible) {
+            doorPivotMarkersVisible = Boolean(visible);
+
+            for (const door of doorRigs) {
+                if (door && door.pivotMarker) {
+                    door.pivotMarker.visible = doorPivotMarkersVisible;
+                }
+            }
+        }
+
+        function setDoorRigPivotLocalPositionPreserveWorld(doorRig, targetLocalPosition) {
+            if (!doorRig || !doorRig.pivot || !doorRig.pivot.parent || !targetLocalPosition) {
+                return false;
+            }
+
+            const pivot = doorRig.pivot;
+            const pivotParent = pivot.parent;
+            const preservedChildren = pivot.children.filter((child) => child !== doorRig.pivotMarker);
+
+            for (const child of preservedChildren) {
+                pivotParent.attach(child);
+            }
+
+            pivot.position.copy(targetLocalPosition);
+
+            for (const child of preservedChildren) {
+                pivot.attach(child);
+            }
+
+            return true;
+        }
+
+        function applyHardcodedManualDoorPivotWorldPoints() {
+            if (!doorRigs.length || !manualDoorGroupPivotWorldPoints.length) {
+                return;
+            }
+
+            for (let groupIndex = 0; groupIndex < manualDoorGroupPivotWorldPoints.length; groupIndex += 1) {
+                const pivotPoint = manualDoorGroupPivotWorldPoints[groupIndex];
+                if (!Array.isArray(pivotPoint) || pivotPoint.length < 3) {
+                    continue;
+                }
+
+                const doorRig = doorRigs.find((door) =>
+                    door
+                    && door.source === 'manual'
+                    && door.manualDoorGroupIndex === groupIndex
+                );
+                if (!doorRig || !doorRig.pivot || !doorRig.pivot.parent) {
+                    continue;
+                }
+
+                const targetWorld = new THREE.Vector3(
+                    Number(pivotPoint[0]) || 0,
+                    Number(pivotPoint[1]) || 0,
+                    Number(pivotPoint[2]) || 0
+                );
+                const targetLocal = doorRig.pivot.parent.worldToLocal(targetWorld);
+                setDoorRigPivotLocalPositionPreserveWorld(doorRig, targetLocal);
+            }
+        }
+
+        function updateDoorDebugInfo() {
+            const doorDebugEl = document.getElementById('door-debug');
+            if (!doorDebugEl) {
+                return;
+            }
+
+            if (!doorRigs.length) {
+                doorDebugEl.textContent = 'Doors: no doors rigged';
+                return;
+            }
+
+            const names = doorRigs
+                .map((door) => `${door.side[0].toUpperCase()}${door.segment[0].toUpperCase()}:${door.name}`)
+                .join(' | ');
+            const sourceModes = Array.from(new Set(doorRigs.map((door) => door.source))).join('/');
+            const direction = doorOpenDirectionMultiplier > 0 ? 'normal' : 'flipped';
+            doorDebugEl.textContent = `Doors: ${doorRigs.length} rigged (${sourceModes}, ${direction}) | ${names}`;
+        }
+
+        function setDoorOpenState(shouldOpen, side = null) {
+            let hasTargetDoor = false;
+            for (const door of doorRigs) {
+                if (side && door.side !== side) {
+                    continue;
+                }
+
+                hasTargetDoor = true;
+                door.targetRotationY = shouldOpen ? door.openRotationY : door.closedRotationY;
+            }
+
+            return hasTargetDoor;
+        }
+
+        function toggleDoorSide(side) {
+            const sideDoors = doorRigs.filter((door) => door.side === side);
+            if (!sideDoors.length) {
+                return false;
+            }
+
+            const anyClosed = sideDoors.some((door) =>
+                Math.abs(door.targetRotationY - door.openRotationY) > 0.0005
+            );
+
+            for (const door of sideDoors) {
+                door.targetRotationY = anyClosed ? door.openRotationY : door.closedRotationY;
+            }
+
+            return true;
+        }
+
+        function toggleAllDoors() {
+            if (!doorRigs.length) {
+                return false;
+            }
+
+            const anyClosed = doorRigs.some((door) =>
+                Math.abs(door.targetRotationY - door.openRotationY) > 0.0005
+            );
+
+            for (const door of doorRigs) {
+                door.targetRotationY = anyClosed ? door.openRotationY : door.closedRotationY;
+            }
+
+            return true;
+        }
+
+        function togglePrimaryManualDoor() {
+            if (!doorRigs.length) {
+                return false;
+            }
+
+            const manualDoor = doorRigs.find((door) => door.source === 'manual') || doorRigs[0];
+            if (!manualDoor) {
+                return false;
+            }
+
+            const isOpen = Math.abs(manualDoor.targetRotationY - manualDoor.openRotationY) < 0.0005;
+            manualDoor.targetRotationY = isOpen ? manualDoor.closedRotationY : manualDoor.openRotationY;
+            return true;
+        }
+
+        function flipDoorOpeningDirection() {
+            if (!doorRigs.length) {
+                return false;
+            }
+
+            doorOpenDirectionMultiplier *= -1;
+            for (const door of doorRigs) {
+                const wasOpen = Math.abs(door.targetRotationY - door.openRotationY) < 0.0005;
+                const openOffset = door.openRotationY - door.closedRotationY;
+                door.openingDirection *= -1;
+                door.openRotationY = door.closedRotationY - openOffset;
+                if (wasOpen) {
+                    door.targetRotationY = door.openRotationY;
+                }
+            }
+
+            return true;
+        }
+
+        function setupDoorControls() {
+            if (doorControlsReady) {
+                return;
+            }
+
+            doorControlsReady = true;
+
+            window.addEventListener('keydown', (event) => {
+                const targetTag = event.target && event.target.tagName;
+                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
+                    return;
+                }
+
+                let handled = false;
+                if (event.key === '1') {
+                    handled = toggleDoorSide('left');
+                } else if (event.key === '2') {
+                    handled = toggleDoorSide('right');
+                } else if (event.key === '3') {
+                    handled = toggleAllDoors();
+                } else if (event.key === '0') {
+                    handled = setDoorOpenState(false);
+                } else if (event.key === '4') {
+                    handled = flipDoorOpeningDirection();
+                } else if (event.key === '5') {
+                    handled = togglePrimaryManualDoor();
+                }
+
+                if (!handled) {
+                    return;
+                }
+
+                event.preventDefault();
+                updateDoorDebugInfo();
+            });
+
+            window.addEventListener('blur', () => {
+                if (!doorRigs.length) {
+                    return;
+                }
+
+                setDoorOpenState(false);
+            });
+        }
+
+        function updateDoorAnimation(deltaTime) {
+            if (!doorRigs.length) {
+                return;
+            }
+
+            const safeDuration = Math.max(0.001, doorAnimationDuration);
+            const blend = 1 - Math.exp(-deltaTime / safeDuration);
+
+            for (const door of doorRigs) {
+                door.currentRotationY = THREE.MathUtils.lerp(door.currentRotationY, door.targetRotationY, blend);
+                if (Math.abs(door.targetRotationY - door.currentRotationY) < doorSnapEpsilon) {
+                    door.currentRotationY = door.targetRotationY;
+                }
+
+                const rotationTarget = door.pivot || door.node;
+                rotationTarget.rotation.y = door.currentRotationY;
+            }
+        }
+
+        function createWheelRigs(root) {
+            const allMeshes = [];
+            root.traverse((node) => {
+                if (node && node.isMesh) {
+                    allMeshes.push(node);
+                }
+            });
+
+            if (!allMeshes.length) {
+                return [];
+            }
+
+            const getNodeLabel = (node) => {
+                const labels = [];
+                let current = node;
+                let depth = 0;
+
+                while (current && depth < 6) {
+                    if (current.name) {
+                        labels.push(current.name);
+                    }
+                    current = current.parent;
+                    depth += 1;
+                }
+
+                return labels.join(' ');
+            };
+
+            const isManuallyExcludedWheelPart = (node) => {
+                const nodeName = (node && node.name ? node.name : '').toLowerCase();
+                if (manualWheelExcludeNames.has(nodeName)) {
+                    return true;
+                }
+
+                const label = getNodeLabel(node).toLowerCase();
+                return manualWheelExcludeLabels.some((token) => label.includes(token));
+            };
+
+            const staticMeshIds = new Set();
+            root.traverse((node) => {
+                if (!node || !node.isObject3D) {
+                    return;
+                }
+
+                if (!wheelStaticPartPattern.test(getNodeLabel(node)) && !isManuallyExcludedWheelPart(node)) {
+                    return;
+                }
+
+                node.traverse((child) => {
+                    if (child && child.isMesh) {
+                        staticMeshIds.add(child.uuid);
+                    }
+                });
+            });
+
+            const isStaticWheelPart = (node) =>
+                staticMeshIds.has(node.uuid) ||
+                wheelStaticPartPattern.test(getNodeLabel(node)) ||
+                isManuallyExcludedWheelPart(node);
+
+            const seedMeshMap = new Map();
+            root.traverse((node) => {
+                if (!node || !node.isObject3D) {
+                    return;
+                }
+
+                const label = getNodeLabel(node);
+                if (!wheelNamePattern.test(label)) {
+                    return;
+                }
+
+                if (node.isMesh && !isStaticWheelPart(node)) {
+                    seedMeshMap.set(node.uuid, node);
+                }
+
+                node.traverse((child) => {
+                    if (child && child.isMesh && !isStaticWheelPart(child)) {
+                        seedMeshMap.set(child.uuid, child);
+                    }
+                });
+            });
+
+            const seedMeshes = Array.from(seedMeshMap.values());
+            if (!seedMeshes.length) {
+                return [];
+            }
+
+            const getMeshCenter = (mesh) => new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+            const getMeshSize = (mesh) => new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+
+            const modelBox = new THREE.Box3().setFromObject(root);
+            const modelCenter = modelBox.getCenter(new THREE.Vector3());
+            const modelSize = modelBox.getSize(new THREE.Vector3());
+            const modelScale = Math.max(modelSize.x, modelSize.y, modelSize.z);
+            const clusterDistance = Math.max(0.05, modelScale * 0.08);
+            const captureDistance = clusterDistance * 1.35;
+            const maxPartSize = modelScale * 0.35;
+
+            const clusters = [];
+            for (const mesh of seedMeshes) {
+                const center = getMeshCenter(mesh);
+                let bestCluster = null;
+                let bestDistance = Number.POSITIVE_INFINITY;
+
+                for (const cluster of clusters) {
+                    const distance = center.distanceTo(cluster.center);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestCluster = cluster;
+                    }
+                }
+
+                if (!bestCluster || bestDistance > clusterDistance) {
+                    clusters.push({ center, seeds: [mesh] });
+                    continue;
+                }
+
+                const nextCount = bestCluster.seeds.length + 1;
+                bestCluster.center.multiplyScalar(bestCluster.seeds.length).add(center).multiplyScalar(1 / nextCount);
+                bestCluster.seeds.push(mesh);
+            }
+
+            const mergedClusters = [];
+            for (const cluster of clusters.sort((a, b) => b.seeds.length - a.seeds.length)) {
+                let targetCluster = null;
+
+                for (const existing of mergedClusters) {
+                    if (cluster.center.distanceTo(existing.center) <= clusterDistance * 1.5) {
+                        targetCluster = existing;
+                        break;
+                    }
+                }
+
+                if (!targetCluster) {
+                    mergedClusters.push({
+                        center: cluster.center.clone(),
+                        seeds: [...cluster.seeds]
+                    });
+                    continue;
+                }
+
+                const totalCount = targetCluster.seeds.length + cluster.seeds.length;
+                targetCluster.center
+                    .multiplyScalar(targetCluster.seeds.length)
+                    .add(cluster.center.clone().multiplyScalar(cluster.seeds.length))
+                    .multiplyScalar(1 / totalCount);
+                targetCluster.seeds.push(...cluster.seeds);
+            }
+
+            const selectedClusters = mergedClusters
+                .sort((a, b) => {
+                    const scoreA = a.seeds.length * 10 + a.center.distanceTo(modelCenter);
+                    const scoreB = b.seeds.length * 10 + b.center.distanceTo(modelCenter);
+                    return scoreB - scoreA;
+                })
+                .slice(0, 4);
+
+            const assignedMeshes = new Set();
+            const rigs = [];
+
+            for (const cluster of selectedClusters) {
+                const members = [];
+                for (const mesh of allMeshes) {
+                    if (assignedMeshes.has(mesh.uuid)) {
+                        continue;
+                    }
+
+                    if (isStaticWheelPart(mesh)) {
+                        continue;
+                    }
+
+                    const size = getMeshSize(mesh);
+                    if (Math.max(size.x, size.y, size.z) > maxPartSize) {
+                        continue;
+                    }
+
+                    const center = getMeshCenter(mesh);
+                    if (center.distanceTo(cluster.center) <= captureDistance) {
+                        members.push(mesh);
+                    }
+                }
+
+                if (!members.length) {
+                    continue;
+                }
+
+                const pivotCenter = new THREE.Vector3();
+                for (const mesh of members) {
+                    pivotCenter.add(getMeshCenter(mesh));
+                }
+                pivotCenter.multiplyScalar(1 / members.length);
+
+                const axis = new THREE.Vector3(1, 0, 0);
+
+                const pivot = new THREE.Group();
+                pivot.position.copy(pivotCenter);
+                const steerGroup = new THREE.Group();
+                pivot.add(steerGroup);
+                const rollGroup = new THREE.Group();
+                steerGroup.add(rollGroup);
+                const spinGroup = new THREE.Group();
+                rollGroup.add(spinGroup);
+
+                root.add(pivot);
+
+                const memberLabels = [];
+                for (const mesh of members) {
+                    const meshName = mesh.name || mesh.uuid;
+                    const parentName = mesh.parent && mesh.parent.name ? mesh.parent.name : '';
+                    memberLabels.push(parentName ? `${meshName} ${parentName}` : meshName);
+                }
+
+                for (const mesh of members) {
+                    assignedMeshes.add(mesh.uuid);
+                    spinGroup.attach(mesh);
+                }
+
+                rigs.push({
+                    pivot,
+                    steerGroup,
+                    rollGroup,
+                    spinGroup,
+                    axis,
+                    baseCenter: pivotCenter.clone(),
+                    axisOffset: new THREE.Vector3(),
+                    memberLabels
+                });
+            }
+
+            return rigs;
+        }
+
+        function rotateWheels(deltaRotation) {
+            if (!wheelRigs.length) {
+                return;
+            }
+
+            const reversedRotation = -deltaRotation;
+            for (const wheel of wheelRigs) {
+                const rollTarget = wheel.rollGroup || wheel.pivot;
+                rollTarget.rotateOnAxis(wheel.axis, reversedRotation);
+            }
+        }
+
+        function updateScrollDrivenWheelRotation(deltaTime) {
+            const currentScrollTop = scrollContainer.scrollTop || 0;
+            const rawScrollDelta = currentScrollTop - lastScrollTop;
+            lastScrollTop = currentScrollTop;
+
+            const hasWheels = wheelRigs.length > 0;
+            const hasScrollData = Number.isFinite(rawScrollDelta);
+            let targetRotationDelta = 0;
+
+            if (hasWheels && hasScrollData && rawScrollDelta !== 0 && scrollWheelSpinIntensity !== 0) {
+                const clampedScrollDelta = THREE.MathUtils.clamp(rawScrollDelta, -maxScrollDeltaPerFrame, maxScrollDeltaPerFrame);
+                targetRotationDelta = clampedScrollDelta * scrollWheelSpinIntensity;
+            }
+
+            const safeDeltaTime = Math.max(1 / 240, deltaTime || 0);
+            const safeDuration = Math.max(0.001, scrollWheelSmoothDuration);
+            const blend = 1 - Math.exp(-safeDeltaTime / safeDuration);
+            smoothedScrollWheelDelta = THREE.MathUtils.lerp(smoothedScrollWheelDelta, targetRotationDelta, blend);
+
+            if (Math.abs(smoothedScrollWheelDelta) < 0.000001 && Math.abs(targetRotationDelta) < 0.000001) {
+                smoothedScrollWheelDelta = 0;
+                return;
+            }
+
+            if (!hasWheels) {
+                return;
+            }
+
+            rotateWheels(smoothedScrollWheelDelta);
+        }
+
+        function applyWheelAxisPoint(wheel) {
+            if (!wheel || !wheel.baseCenter || !wheel.axisOffset) {
+                return;
+            }
+
+            wheel.pivot.position.copy(wheel.baseCenter).add(wheel.axisOffset);
+            if (wheel.spinGroup) {
+                wheel.spinGroup.position.set(
+                    -wheel.axisOffset.x,
+                    -wheel.axisOffset.y,
+                    -wheel.axisOffset.z
+                );
+            }
+        }
+
+        function getWheelAxisPoint(wheel) {
+            if (!wheel || !wheel.baseCenter || !wheel.axisOffset) {
+                return new THREE.Vector3();
+            }
+
+            return wheel.baseCenter.clone().add(wheel.axisOffset);
+        }
+
+        function applyHardcodedWheelAxisPoints() {
+            if (!wheelRigs.length) {
+                return;
+            }
+
+            for (let i = 0; i < wheelRigs.length; i += 1) {
+                const wheel = wheelRigs[i];
+                if (!wheel || !wheel.baseCenter || !wheel.axisOffset) {
+                    continue;
+                }
+
+                const hardcodedPoint = hardcodedWheelAxisPoints[i];
+                if (!hardcodedPoint) {
+                    wheel.axisOffset.set(0, 0, 0);
+                    applyWheelAxisPoint(wheel);
+                    continue;
+                }
+
+                wheel.axisOffset.copy(hardcodedPoint).sub(wheel.baseCenter);
+                applyWheelAxisPoint(wheel);
+            }
+        }
+
+        function attachMappedCalipersToWheelSteering(root) {
+            if (!root || !wheelRigs.length) {
+                return;
+            }
+
+            caliperDebugStatus.length = 0;
+
+            const meshesByName = new Map();
+            root.traverse((node) => {
+                if (!node || !node.isMesh || !node.name) {
+                    return;
+                }
+
+                const key = node.name.toLowerCase();
+                if (!meshesByName.has(key)) {
+                    meshesByName.set(key, []);
+                }
+
+                meshesByName.get(key).push(node);
+            });
+
+            const chooseNearestSteeringWheelIndex = (mesh) => {
+                const candidateIndices = frontWheelIndices.length
+                    ? frontWheelIndices
+                    : wheelRigs.map((_, index) => index);
+
+                let nearestIndex = candidateIndices[0] ?? 0;
+                let nearestDistance = Number.POSITIVE_INFINITY;
+                const meshCenter = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+
+                for (const wheelIndex of candidateIndices) {
+                    const wheel = wheelRigs[wheelIndex];
+                    if (!wheel) {
+                        continue;
+                    }
+
+                    const axisPoint = getWheelAxisPoint(wheel);
+                    const distance = meshCenter.distanceTo(axisPoint);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearestIndex = wheelIndex;
+                    }
+                }
+
+                return nearestIndex;
+            };
+
+            for (let i = 0; i < manualCaliperMeshByWheelIndex.length; i += 1) {
+                const wheel = wheelRigs[i];
+                const targetName = manualCaliperMeshByWheelIndex[i];
+                if (!wheel || !wheel.steerGroup || !targetName) {
+                    continue;
+                }
+
+                const targetMeshes = meshesByName.get(targetName) || [];
+                for (const mesh of targetMeshes) {
+                    wheel.steerGroup.attach(mesh);
+                }
+
+                const statusText = targetMeshes.length > 0
+                    ? `W${i + 1} ${targetName} x${targetMeshes.length}`
+                    : `W${i + 1} ${targetName} missing`;
+                caliperDebugStatus.push(statusText);
+            }
+
+            for (const extraName of manualExtraCaliperMeshNames) {
+                const targetMeshes = meshesByName.get(extraName) || [];
+                if (!targetMeshes.length) {
+                    caliperDebugStatus.push(`Extra ${extraName} missing`);
+                    continue;
+                }
+
+                const attachedByWheel = new Map();
+                for (const mesh of targetMeshes) {
+                    const wheelIndex = chooseNearestSteeringWheelIndex(mesh);
+                    const wheel = wheelRigs[wheelIndex];
+                    if (!wheel || !wheel.steerGroup) {
+                        continue;
+                    }
+
+                    wheel.steerGroup.attach(mesh);
+                    attachedByWheel.set(wheelIndex, (attachedByWheel.get(wheelIndex) || 0) + 1);
+                }
+
+                if (!attachedByWheel.size) {
+                    caliperDebugStatus.push(`Extra ${extraName} missing`);
+                    continue;
+                }
+
+                const attachSummary = Array.from(attachedByWheel.entries())
+                    .map(([wheelIndex, count]) => `W${wheelIndex + 1} x${count}`)
+                    .join(', ');
+                caliperDebugStatus.push(`Extra ${extraName} -> ${attachSummary}`);
+            }
+
+            updateCaliperDebugInfo();
+        }
+
+        function updateCaliperDebugInfo() {
+            const caliperDebugEl = document.getElementById('caliper-debug');
+            if (!caliperDebugEl) {
+                return;
+            }
+
+            if (!caliperDebugStatus.length) {
+                const mainCalipers = manualCaliperMeshByWheelIndex
+                    .map((name, index) => `W${index + 1} ${name}`);
+                const extraCalipers = manualExtraCaliperMeshNames
+                    .map((name) => `Extra ${name}`);
+                caliperDebugEl.textContent = [...mainCalipers, ...extraCalipers].join(' | ');
+                return;
+            }
+
+            caliperDebugEl.textContent = caliperDebugStatus.join(' | ');
+        }
+
+        function updateFrontWheelIndices() {
+            frontWheelIndices.length = 0;
+
+            if (!wheelRigs.length) {
+                return;
+            }
+
+            if (wheelRigs.length <= 2) {
+                for (let i = 0; i < wheelRigs.length; i += 1) {
+                    frontWheelIndices.push(i);
+                }
+                return;
+            }
+
+            const indexedPoints = wheelRigs.map((wheel, index) => ({
+                index,
+                point: getWheelAxisPoint(wheel)
+            }));
+
+            const xValues = indexedPoints.map((item) => item.point.x);
+            const zValues = indexedPoints.map((item) => item.point.z);
+            const xRange = Math.max(...xValues) - Math.min(...xValues);
+            const zRange = Math.max(...zValues) - Math.min(...zValues);
+            const longitudinalAxis = zRange >= xRange ? 'z' : 'x';
+
+            indexedPoints.sort((a, b) => a.point[longitudinalAxis] - b.point[longitudinalAxis]);
+            const frontCount = Math.min(2, indexedPoints.length);
+            for (let i = 0; i < frontCount; i += 1) {
+                frontWheelIndices.push(indexedPoints[i].index);
+            }
+        }
+
+        function applyFrontWheelSteering(targetAngle) {
+            const clampedAngle = THREE.MathUtils.clamp(targetAngle, -maxSteeringAngle, maxSteeringAngle);
+            const frontSet = new Set(frontWheelIndices);
+
+            for (let i = 0; i < wheelRigs.length; i += 1) {
+                const wheel = wheelRigs[i];
+                if (!wheel || !wheel.steerGroup) {
+                    continue;
+                }
+
+                wheel.steerGroup.rotation.y = frontSet.has(i) ? clampedAngle : 0;
+            }
+        }
+
+        function syncSteeringFromInput() {
+            if (steerLeftPressed && !steerRightPressed) {
+                steeringTargetAngle = maxSteeringAngle;
+                return;
+            }
+
+            if (steerRightPressed && !steerLeftPressed) {
+                steeringTargetAngle = -maxSteeringAngle;
+                return;
+            }
+
+            steeringTargetAngle = 0;
+        }
+
+        function updateSteeringAnimation(deltaTime) {
+            const clampedTarget = THREE.MathUtils.clamp(steeringTargetAngle, -maxSteeringAngle, maxSteeringAngle);
+            const safeDuration = Math.max(0.001, steeringAnimationDuration);
+            const blend = 1 - Math.exp(-deltaTime / safeDuration);
+
+            steeringAngle = THREE.MathUtils.lerp(steeringAngle, clampedTarget, blend);
+            if (Math.abs(clampedTarget - steeringAngle) < steeringSnapEpsilon) {
+                steeringAngle = clampedTarget;
+            }
+
+            applyFrontWheelSteering(steeringAngle);
+        }
+
+        function setupWheelControls() {
+            if (wheelControlsReady) {
+                return;
+            }
+
+            wheelControlsReady = true;
+
+            window.addEventListener('keydown', (event) => {
+                const targetTag = event.target && event.target.tagName;
+                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
+                    return;
+                }
+
+                let handled = false;
+                if (event.key === 't' || event.key === 'T') {
+                    wheelAutoSpin = !wheelAutoSpin;
+                    handled = true;
+                } else if (event.key === 'r' || event.key === 'R') {
+                    wheelSpinSpeed = Math.min(40, wheelSpinSpeed + 1);
+                    handled = true;
+                } else if (event.key === 'f' || event.key === 'F') {
+                    wheelSpinSpeed = Math.max(-40, wheelSpinSpeed - 1);
+                    handled = true;
+                } else if (event.key === 'g' || event.key === 'G') {
+                    wheelAutoSpin = false;
+                    wheelSpinSpeed = 0;
+                    handled = true;
+                }
+
+                if (!handled) {
+                    return;
+                }
+
+                event.preventDefault();
+            });
+        }
+
+        function setupWheelSteeringControls() {
+            if (steeringControlsReady) {
+                return;
+            }
+
+            steeringControlsReady = true;
+
+            window.addEventListener('keydown', (event) => {
+                const targetTag = event.target && event.target.tagName;
+                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
+                    return;
+                }
+
+                let handled = false;
+                if (event.key === 'ArrowLeft') {
+                    steerLeftPressed = true;
+                    handled = true;
+                } else if (event.key === 'ArrowRight') {
+                    steerRightPressed = true;
+                    handled = true;
+                }
+
+                if (!handled) {
+                    return;
+                }
+
+                event.preventDefault();
+                syncSteeringFromInput();
+            });
+
+            window.addEventListener('keyup', (event) => {
+                let handled = false;
+                if (event.key === 'ArrowLeft') {
+                    steerLeftPressed = false;
+                    handled = true;
+                } else if (event.key === 'ArrowRight') {
+                    steerRightPressed = false;
+                    handled = true;
+                }
+
+                if (!handled) {
+                    return;
+                }
+
+                syncSteeringFromInput();
+            });
+
+            window.addEventListener('blur', () => {
+                steerLeftPressed = false;
+                steerRightPressed = false;
+                syncSteeringFromInput();
+            });
+        }
+
+        function setInputValue(inputId, value) {
+            const input = document.getElementById(inputId);
+            if (!input) {
+                return;
+            }
+
+            const isFocusedInput = document.activeElement === input;
+            if (isFocusedInput && !isTranslateDrag && !isRotateDrag) {
+                return;
+            }
+
+            const liveDecimals = isTranslateDrag || isRotateDrag ? 3 : 2;
+            input.value = Number(value).toFixed(liveDecimals);
+        }
+
+        function refreshModelTimeline() {
+            if (!modelRig || !modelPivot) {
+                return;
+            }
+
+            setupModelScrollAnimations(sections, modelRig, modelPivot);
+            ScrollTrigger.refresh();
+        }
+
+        function updateKeyframeEditorInputs() {
+            const modelSectionEl = document.getElementById('model-section');
+            if (modelSectionEl) {
+                modelSectionEl.textContent = `${activeSectionIndex + 1} / ${sections.length}`;
+            }
+
+            const activeModelFrame = modelKeyframes[activeSectionIndex] || modelKeyframes[0];
+            if (activeModelFrame) {
+                setInputValue('pos-x', activeModelFrame[0]);
+                setInputValue('pos-y', activeModelFrame[1]);
+                setInputValue('pos-z', activeModelFrame[2]);
+                setInputValue('rot-x', activeModelFrame[3]);
+                setInputValue('rot-y', activeModelFrame[4]);
+                setInputValue('rot-z', activeModelFrame[5]);
+            }
+
+            const activePivotFrame = getPivotKeyframe(activeSectionIndex);
+            setInputValue('axis-x', activePivotFrame[0]);
+            setInputValue('axis-y', activePivotFrame[1]);
+            setInputValue('axis-z', activePivotFrame[2]);
+
+            const activeLightFrame = getLightKeyframe(activeSectionIndex);
+            setInputValue('light-x', activeLightFrame[0]);
+            setInputValue('light-y', activeLightFrame[1]);
+            setInputValue('light-z', activeLightFrame[2]);
+        }
+
+        function setupKeyframeEditorControls() {
+            if (keyframeEditorReady) {
+                return;
+            }
+
+            keyframeEditorReady = true;
+            updateKeyframeEditorInputs();
+
+            const bindInput = (inputId, onCommit) => {
+                const input = document.getElementById(inputId);
+                if (!input) {
+                    return;
+                }
+
+                input.addEventListener('change', () => {
+                    const parsedValue = parseFloat(input.value);
+                    if (!Number.isFinite(parsedValue)) {
+                        updateKeyframeEditorInputs();
+                        return;
+                    }
+
+                    activeSectionIndex = getCurrentSectionIndex();
+                    onCommit(parseFloat(parsedValue.toFixed(2)), activeSectionIndex);
+                    updateKeyframeEditorInputs();
+                });
+            };
+
+            bindInput('pos-x', (value, sectionIndex) => {
+                modelKeyframes[sectionIndex][0] = value;
+                if (modelRig) {
+                    modelRig.position.x = value;
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('pos-y', (value, sectionIndex) => {
+                modelKeyframes[sectionIndex][1] = value;
+                if (modelRig) {
+                    modelRig.position.y = value;
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('pos-z', (value, sectionIndex) => {
+                modelKeyframes[sectionIndex][2] = value;
+                if (modelRig) {
+                    modelRig.position.z = value;
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('rot-x', (value, sectionIndex) => {
+                modelKeyframes[sectionIndex][3] = value;
+                if (modelPivot) {
+                    modelPivot.rotation.x = value;
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('rot-y', (value, sectionIndex) => {
+                modelKeyframes[sectionIndex][4] = value;
+                if (modelPivot) {
+                    modelPivot.rotation.y = value;
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('rot-z', (value, sectionIndex) => {
+                modelKeyframes[sectionIndex][5] = value;
+                if (modelPivot) {
+                    modelPivot.rotation.z = value;
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('axis-x', (value, sectionIndex) => {
+                const pivotFrame = getPivotKeyframe(sectionIndex);
+                pivotFrame[0] = value;
+                pivotKeyframes[sectionIndex] = pivotFrame;
+                if (sectionIndex === activeSectionIndex) {
+                    applyPivotOffsetFromKeyframe(sectionIndex);
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('axis-y', (value, sectionIndex) => {
+                const pivotFrame = getPivotKeyframe(sectionIndex);
+                pivotFrame[1] = value;
+                pivotKeyframes[sectionIndex] = pivotFrame;
+                if (sectionIndex === activeSectionIndex) {
+                    applyPivotOffsetFromKeyframe(sectionIndex);
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('axis-z', (value, sectionIndex) => {
+                const pivotFrame = getPivotKeyframe(sectionIndex);
+                pivotFrame[2] = value;
+                pivotKeyframes[sectionIndex] = pivotFrame;
+                if (sectionIndex === activeSectionIndex) {
+                    applyPivotOffsetFromKeyframe(sectionIndex);
+                }
+                refreshModelTimeline();
+            });
+
+            bindInput('light-x', (value, sectionIndex) => {
+                const [currentX, currentY, currentZ] = getLightKeyframe(sectionIndex);
+                applyLightToKeyframe(sectionIndex, value, currentY, currentZ);
+                if (sectionIndex === activeSectionIndex) {
+                    applyLightFromKeyframe(sectionIndex);
+                }
+            });
+
+            bindInput('light-y', (value, sectionIndex) => {
+                const [currentX, currentY, currentZ] = getLightKeyframe(sectionIndex);
+                applyLightToKeyframe(sectionIndex, currentX, value, currentZ);
+                if (sectionIndex === activeSectionIndex) {
+                    applyLightFromKeyframe(sectionIndex);
+                }
+            });
+
+            bindInput('light-z', (value, sectionIndex) => {
+                const [currentX, currentY, currentZ] = getLightKeyframe(sectionIndex);
+                applyLightToKeyframe(sectionIndex, currentX, currentY, value);
+                if (sectionIndex === activeSectionIndex) {
+                    applyLightFromKeyframe(sectionIndex);
+                }
+            });
+        }
+
         function syncPivotOffsetToSection() {
             const sectionIndex = getCurrentSectionIndex();
 
@@ -420,119 +3364,12 @@
             }
 
             activeSectionIndex = sectionIndex;
+            applyLightFromKeyframe(activeSectionIndex);
             if (!smoothPivotEnabled) {
                 applyPivotOffsetFromKeyframe(activeSectionIndex);
-            } else {
-                updatePivotDebugInfo();
-            }
-        }
-
-        function updatePivotDebugInfo() {
-            const pivotOffsetEl = document.getElementById('pivot-offset');
-            const pivotSectionEl = document.getElementById('pivot-section');
-            const pivotStepEl = document.getElementById('pivot-step');
-            const modelSectionEl = document.getElementById('model-section');
-
-            if (pivotOffsetEl) {
-                pivotOffsetEl.textContent =
-                    `${pivotOffset.x.toFixed(2)}, ${pivotOffset.y.toFixed(2)}, ${pivotOffset.z.toFixed(2)}`;
             }
 
-            if (pivotSectionEl) {
-                pivotSectionEl.textContent = `${activeSectionIndex + 1} / ${sections.length}`;
-            }
-
-            if (modelSectionEl) {
-                modelSectionEl.textContent = `${activeSectionIndex + 1} / ${sections.length}`;
-            }
-
-            if (pivotStepEl) {
-                pivotStepEl.textContent = pivotStep.toFixed(2);
-            }
-        }
-
-        function setupPivotDebugControls() {
-            if (pivotControlsReady) {
-                return;
-            }
-
-            pivotControlsReady = true;
-            updatePivotDebugInfo();
-
-            window.addEventListener('keydown', (event) => {
-                if (!model) {
-                    return;
-                }
-
-                const targetTag = event.target && event.target.tagName;
-                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') {
-                    return;
-                }
-
-                const step = event.shiftKey ? pivotStep * 5 : pivotStep;
-                let handled = true;
-                let pivotChanged = false;
-
-                switch (event.key) {
-                    case 'ArrowLeft':
-                        pivotOffset.x -= step;
-                        pivotChanged = true;
-                        break;
-                    case 'ArrowRight':
-                        pivotOffset.x += step;
-                        pivotChanged = true;
-                        break;
-                    case 'ArrowUp':
-                        pivotOffset.z -= step;
-                        pivotChanged = true;
-                        break;
-                    case 'ArrowDown':
-                        pivotOffset.z += step;
-                        pivotChanged = true;
-                        break;
-                    case 'PageUp':
-                        pivotOffset.y += step;
-                        pivotChanged = true;
-                        break;
-                    case 'PageDown':
-                        pivotOffset.y -= step;
-                        pivotChanged = true;
-                        break;
-                    case '[':
-                        pivotStep = Math.max(0.01, pivotStep - 0.01);
-                        break;
-                    case ']':
-                        pivotStep = Math.min(5, pivotStep + 0.01);
-                        break;
-                    case '0':
-                        pivotOffset.copy(defaultPivotOffset);
-                        pivotChanged = true;
-                        break;
-                    case 'h':
-                    case 'H':
-                        if (pivotHelper) {
-                            pivotHelper.visible = !pivotHelper.visible;
-                        }
-                        break;
-                    default:
-                        handled = false;
-                }
-
-                if (!handled) {
-                    return;
-                }
-
-                event.preventDefault();
-                if (pivotChanged) {
-                    activeSectionIndex = getCurrentSectionIndex();
-                    applyPivotOffset();
-                    applyPivotOffsetToKeyframe(activeSectionIndex);
-                    if (modelRig && modelPivot) {
-                        setupModelScrollAnimations(sections, modelRig, modelPivot);
-                        ScrollTrigger.refresh();
-                    }
-                }
-            });
+            updateKeyframeEditorInputs();
         }
 
         function setupModelDragControls() {
@@ -542,23 +3379,54 @@
 
             dragControlsReady = true;
 
+            const setModifierState = (event, isPressed) => {
+                if (event.key === 'Shift') {
+                    isShiftPressed = isPressed;
+                }
+                if (event.key === 'Alt') {
+                    isAltPressed = isPressed;
+                }
+            };
+
+            window.addEventListener('keydown', (event) => setModifierState(event, true));
+            window.addEventListener('keyup', (event) => setModifierState(event, false));
+            window.addEventListener('blur', () => {
+                isShiftPressed = false;
+                isAltPressed = false;
+            });
+
             const handlePointerDown = (event) => {
                 if (!modelRig || !modelPivot || !camera) {
                     return;
                 }
 
-                if (event.shiftKey) {
+                if (event.button !== 0) {
+                    return;
+                }
+
+                const activeElement = document.activeElement;
+                if (activeElement && activeElement.tagName === 'INPUT' && activeElement.closest && activeElement.closest('#debug-info')) {
+                    activeElement.blur();
+                }
+
+                const wantsTranslate = event.shiftKey || isShiftPressed;
+                const wantsRotate = event.altKey || isAltPressed;
+
+                if (wantsTranslate) {
                     isTranslateDrag = true;
                     isRotateDrag = false;
-                } else if (event.altKey) {
+                } else if (wantsRotate) {
                     isRotateDrag = true;
                     isTranslateDrag = false;
                 } else {
                     return;
                 }
 
+                event.preventDefault();
+                event.stopPropagation();
+
                 activeSectionIndex = getCurrentSectionIndex();
-                updatePivotDebugInfo();
+                updateKeyframeEditorInputs();
 
                 if (controls) {
                     controls.enabled = false;
@@ -574,6 +3442,7 @@
                     dragPlane.set(new THREE.Vector3(0, 1, 0), -modelRig.position.y);
                     updateDragPointer(event);
                     dragRaycaster.setFromCamera(dragPointer, camera);
+                    lastDragRigPosition.copy(modelRig.position);
 
                     if (dragRaycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
                         dragOffset.copy(modelRig.position).sub(dragIntersection);
@@ -586,12 +3455,23 @@
             };
 
             const handlePointerMove = (event) => {
+                let dragChanged = false;
+
                 if (isTranslateDrag && modelRig && camera) {
                     updateDragPointer(event);
                     dragRaycaster.setFromCamera(dragPointer, camera);
 
                     if (dragRaycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
                         modelRig.position.copy(dragIntersection).add(dragOffset);
+                        enforceModelAboveGarageGround();
+                        dragMovement.subVectors(modelRig.position, lastDragRigPosition);
+                        const dragDistance = dragMovement.length();
+                        if (dragDistance > 0) {
+                            const travelDirection = dragMovement.z === 0 ? Math.sign(dragMovement.x || 1) : Math.sign(dragMovement.z);
+                            rotateWheels(-travelDirection * dragDistance * 8);
+                        }
+                        lastDragRigPosition.copy(modelRig.position);
+                        dragChanged = true;
                     }
                 }
 
@@ -599,6 +3479,11 @@
                     const deltaX = event.clientX - dragLastX;
                     dragLastX = event.clientX;
                     modelPivot.rotation.y += deltaX * 0.005;
+                    dragChanged = true;
+                }
+
+                if (dragChanged) {
+                    syncActiveDragTransform();
                 }
             };
 
@@ -621,9 +3506,10 @@
                 ScrollTrigger.refresh();
             };
 
-            renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+            renderer.domElement.addEventListener('pointerdown', handlePointerDown, true);
             renderer.domElement.addEventListener('pointermove', handlePointerMove);
             renderer.domElement.addEventListener('pointerup', handlePointerUp);
+            renderer.domElement.addEventListener('pointercancel', handlePointerUp);
             renderer.domElement.addEventListener('pointerleave', handlePointerUp);
         }
 
@@ -652,6 +3538,8 @@
             const [startPivotX, startPivotY, startPivotZ] = getPivotKeyframe(0);
             pivotOffset.set(startPivotX, startPivotY, startPivotZ);
             applyPivotOffset();
+            applyLightFromKeyframe(0);
+            updateKeyframeEditorInputs();
 
             if (frameCount === 1) {
                 return;
@@ -667,32 +3555,51 @@
                 }
             });
 
+            const segmentDurations = [];
+            for (let i = 0; i < frameCount - 1; i += 1) {
+                const sectionNode = sectionNodes[i];
+                const fallbackHeight = window.innerHeight || 1;
+                let sectionHeight = sectionNode
+                    ? Math.max(1, sectionNode.offsetHeight || sectionNode.clientHeight || fallbackHeight)
+                    : fallbackHeight;
+
+                segmentDurations.push(sectionHeight);
+            }
+
+            const durationUnit = segmentDurations.length
+                ? Math.max(1, Math.min(...segmentDurations))
+                : 1;
+            let timelineCursor = 0;
+
             for (let i = 1; i < frameCount; i += 1) {
                 const [posX, posY, posZ, rotX, rotY, rotZ] = modelKeyframes[i];
                 const [pivotX, pivotY, pivotZ] = getPivotKeyframe(i);
                 const segmentIndex = i - 1;
+                const segmentDuration = Math.max(0.05, segmentDurations[segmentIndex] / durationUnit);
 
                 timeline.to(rig.position, {
                     x: posX,
                     y: posY,
                     z: posZ,
-                    duration: 1
-                }, segmentIndex);
+                    duration: segmentDuration
+                }, timelineCursor);
 
                 timeline.to(pivot.rotation, {
                     x: rotX,
                     y: rotY,
                     z: rotZ,
-                    duration: 1
-                }, segmentIndex);
+                    duration: segmentDuration
+                }, timelineCursor);
 
                 timeline.to(pivotOffset, {
                     x: pivotX,
                     y: pivotY,
                     z: pivotZ,
-                    duration: 1,
+                    duration: segmentDuration,
                     onUpdate: applyPivotOffset
-                }, segmentIndex);
+                }, timelineCursor);
+
+                timelineCursor += segmentDuration;
             }
 
             modelScrollTimeline = timeline;

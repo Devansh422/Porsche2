@@ -21,7 +21,6 @@ function createScrollAnimations(sections, model) {
                 markers: false
             },
             opacity: 0.3,
-            scale: 0.9,
             ease: 'power2.out'
         });
 
