@@ -164,10 +164,6 @@
         let cyberpunkNeonSetupDone = false;
         let garageFloorWorldY = Number.NaN;
         let neutralEnvironmentTexture = null;
-        let forestEnvironmentTexture = null;
-        let sunsetEnvironmentTexture = null;
-        let skyEnvironmentTexture = null;
-        let activeEnvironmentPreset = 'neutral';
         let modelScrollTimeline = null;
         let dragControlsReady = false;
         let isTranslateDrag = false;
@@ -291,9 +287,6 @@
         let scrollWheelSmoothDuration = 0.18;
         let smoothedScrollWheelDelta = 0;
         let lastScrollTop = scrollContainer.scrollTop || 0;
-        const coolShadowFillColor = [0.7, 0.75, 0.85];
-        const coolShadowFillGroundColor = [0.2, 0.22, 0.26];
-        const coolShadowFillIntensity = 0.2;
         const defaultAmbientLightColor = [0.04, 0.04, 0.16];
         const defaultAmbientLightIntensity = 0.14;
         const defaultFillLightColor = [0.08, 0.14, 0.3];
@@ -303,19 +296,11 @@
         const defaultShadowOpacity = fixedShadowSettings.opacity;
         const defaultContactShadowOpacity = 0.26;
         const defaultShadowRadius = 1.2;
-        const forestHdriPath = 'assets/forest.hdr';
-        const forestEnvironmentFallbackPath = 'assets/d3.jpg';
-        const sunsetHdriPath = 'assets/sunset.hdr';
-        const sunsetEnvironmentFallbackPath = 'assets/d4.jpg';
-        const skyHdriPath = 'assets/sky.hdr';
-        const skyEnvironmentFallbackPath = 'assets/d5.jpg';
         const garageModelPath = 'assets/garage.glb';
         const garagePlacementOffset = new THREE.Vector3(0, 0, 0);
         const garageUniformScale = 4;
         const defaultEnvironmentIntensityScale = 0.68;
         const defaultMinimumRoughness = 0;
-        const defaultSunsetEnvironmentBlend = 0;
-        const defaultSkyEnvironmentBlend = 0;
         const defaultMoonLightColor = [0.267, 0.267, 0.533];
         const defaultRimLightColor = [0.06, 0.1, 0.22];
         const defaultRimLightPoint = [0, 4, -10];
@@ -396,76 +381,10 @@
                     const environmentTarget = pmremGenerator.fromEquirectangular(texture);
                     neutralEnvironmentTexture = environmentTarget.texture;
                     texture.dispose();
-                    applyEnvironmentPreset(activeEnvironmentPreset);
+                    applyEnvironmentPreset();
                 }, undefined, function (error) {
                     console.error('Error loading HDR:', error);
                 });
-
-            const loadForestEnvironmentFallback = () => {
-                new THREE.TextureLoader().load(forestEnvironmentFallbackPath, function (texture) {
-                    texture.mapping = THREE.EquirectangularReflectionMapping;
-                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
-                    forestEnvironmentTexture = environmentTarget.texture;
-                    texture.dispose();
-                    applyEnvironmentPreset(activeEnvironmentPreset);
-                }, undefined, function (error) {
-                    console.warn('Forest environment map fallback failed:', error);
-                });
-            };
-
-            new RGBELoader().load(forestHdriPath, function (texture) {
-                texture.mapping = THREE.EquirectangularReflectionMapping;
-                const environmentTarget = pmremGenerator.fromEquirectangular(texture);
-                forestEnvironmentTexture = environmentTarget.texture;
-                texture.dispose();
-                applyEnvironmentPreset(activeEnvironmentPreset);
-            }, undefined, function () {
-                loadForestEnvironmentFallback();
-            });
-
-            const loadSunsetEnvironmentFallback = () => {
-                new THREE.TextureLoader().load(sunsetEnvironmentFallbackPath, function (texture) {
-                    texture.mapping = THREE.EquirectangularReflectionMapping;
-                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
-                    sunsetEnvironmentTexture = environmentTarget.texture;
-                    texture.dispose();
-                    applyEnvironmentPreset(activeEnvironmentPreset);
-                }, undefined, function (error) {
-                    console.warn('Sunset environment map fallback failed:', error);
-                });
-            };
-
-            new RGBELoader().load(sunsetHdriPath, function (texture) {
-                texture.mapping = THREE.EquirectangularReflectionMapping;
-                const environmentTarget = pmremGenerator.fromEquirectangular(texture);
-                sunsetEnvironmentTexture = environmentTarget.texture;
-                texture.dispose();
-                applyEnvironmentPreset(activeEnvironmentPreset);
-            }, undefined, function () {
-                loadSunsetEnvironmentFallback();
-            });
-
-            const loadSkyEnvironmentFallback = () => {
-                new THREE.TextureLoader().load(skyEnvironmentFallbackPath, function (texture) {
-                    texture.mapping = THREE.EquirectangularReflectionMapping;
-                    const environmentTarget = pmremGenerator.fromEquirectangular(texture);
-                    skyEnvironmentTexture = environmentTarget.texture;
-                    texture.dispose();
-                    applyEnvironmentPreset(activeEnvironmentPreset);
-                }, undefined, function (error) {
-                    console.warn('Sky environment map fallback failed:', error);
-                });
-            };
-
-            new RGBELoader().load(skyHdriPath, function (texture) {
-                texture.mapping = THREE.EquirectangularReflectionMapping;
-                const environmentTarget = pmremGenerator.fromEquirectangular(texture);
-                skyEnvironmentTexture = environmentTarget.texture;
-                texture.dispose();
-                applyEnvironmentPreset(activeEnvironmentPreset);
-            }, undefined, function () {
-                loadSkyEnvironmentFallback();
-            });
 
             // Load GLB models - GLTFLoader works with both .gltf and .glb files
             const loader = new GLTFLoader();
@@ -773,7 +692,6 @@
                 return;
             }
 
-            activeEnvironmentPreset = 'neutral';
             if (scene.environment !== neutralEnvironmentTexture) {
                 scene.environment = neutralEnvironmentTexture;
             }
@@ -812,96 +730,26 @@
             }
         }
 
-        setupSectionAnimations(sections);
-
         // Hardcoded model keyframes per section.
         // Format: [posX, posY, posZ, rotX, rotY, rotZ]
         const modelKeyframes = [
-            [-10.63, 0, -8.66, 0, 0, 0],
-            [2, 0, 35, 0, -0.5, 0],
-            [11, 0, 8, 0, -1, 0],
-            [10, -40, 2, 0, -1.5, 0],
-            [10, 0, 0, 0, -2, 0],
-            [10, 0, 0, 0, -2.5, 0],
-            [10, 0, 0, 0, -3, 0],
-            [10, 0, 0, 0, -3.5, 0],
-            [10, 0, 0, 0, -4, 0],
-            [14, 0.2, -2, 0, -4.4, 0],
-            [9, 0.8, -12, 0, -4.8, 0],
-            [0, 0, -18, 0, -5.2, 0]
+            [-10.63, 0, -8.66, 0, 0, 0]
         ];
 
         // Per-section pivot offsets.
         // Format: [offsetX, offsetY, offsetZ]
         // Edit these values manually per section.
         const pivotKeyframes = [
-            [0, -0.7, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0]
+            [0, -0.7, 0]
         ];
 
         // Per-section light positions.
         // Format: [lightX, lightY, lightZ]
         // Edit these values manually per section.
         const lightKeyframes = [
-            [20, 20, -30],
-            [8, 12, 6],
-            [8, 12, 6],
-            [40, -30, 6],
-            [8, 12, 6],
-            [8, 12, 6],
-            [8, 12, 6],
-            [8, 12, 6],
-            [8, 12, 6],
-            [10, 12, 4],
-            [6, 14, 10],
-            [14, 10, -8]
+            [20, 20, -30]
         ];
-        function ensureSectionKeyframeCoverage() {
-            const sectionCount = sections.length;
 
-            while (modelKeyframes.length < sectionCount) {
-                const source = modelKeyframes[modelKeyframes.length - 1] || [0, 0, 0, 0, 0, 0];
-                modelKeyframes.push([...source]);
-            }
-
-            while (pivotKeyframes.length < sectionCount) {
-                const source = pivotKeyframes[pivotKeyframes.length - 1] || [defaultPivotOffset.x, defaultPivotOffset.y, defaultPivotOffset.z];
-                pivotKeyframes.push([...source]);
-            }
-
-            while (lightKeyframes.length < sectionCount) {
-                const source = lightKeyframes[lightKeyframes.length - 1] || [defaultLightPoint[0], defaultLightPoint[1], defaultLightPoint[2]];
-                lightKeyframes.push([...source]);
-            }
-        }
-
-        ensureSectionKeyframeCoverage();
-
-        function setupSectionAnimations(sectionNodes) {
-            sectionNodes.forEach((section) => {
-                gsap.from(section, {
-                    scrollTrigger: {
-                        trigger: section,
-                        start: 'top center',
-                        end: 'bottom center',
-                        scrub: 0.6,
-                        markers: false
-                    },
-                    opacity: 0.3,
-                    ease: 'power2.out'
-                });
-            });
-        }
         function updateDragPointer(event) {
             const rect = renderer.domElement.getBoundingClientRect();
             dragPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -910,6 +758,10 @@
 
         function getCurrentSectionIndex() {
             if (!sections.length) {
+                return 0;
+            }
+
+            if (sections.length === 1) {
                 return 0;
             }
 
@@ -1549,20 +1401,6 @@
             applyPivotOffset();
         }
 
-        function applyPivotOffsetToKeyframe(index) {
-            if (!pivotKeyframes[index]) {
-                pivotKeyframes[index] = [
-                    defaultPivotOffset.x,
-                    defaultPivotOffset.y,
-                    defaultPivotOffset.z
-                ];
-            }
-
-            pivotKeyframes[index][0] = parseFloat(pivotOffset.x.toFixed(2));
-            pivotKeyframes[index][1] = parseFloat(pivotOffset.y.toFixed(2));
-            pivotKeyframes[index][2] = parseFloat(pivotOffset.z.toFixed(2));
-        }
-
         function getLightKeyframe(index) {
             const keyframe = lightKeyframes[index];
 
@@ -1664,7 +1502,7 @@
                 bloomPass.radius = defaultBloomRadius;
             }
 
-            applyEnvironmentPreset('neutral');
+            applyEnvironmentPreset();
             applyMaterialSurfaceLook(defaultEnvironmentIntensityScale, defaultMinimumRoughness, true);
         }
 
