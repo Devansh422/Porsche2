@@ -2596,25 +2596,25 @@
                 {
                     id: 'wheel',
                     title: 'Wheel',
-                    description: 'Wheel and tire assembly area. Click to inspect wheel detail.',
+                    description: 'Center-lock wheels straight from Formula 1, a single bolt holds each wheel, making every pit stop feel dangerously, gloriously fast.',
                     localPosition: [-16.81, 1.4, -14.09]
                 },
                 {
                     id: 'bonnet',
                     title: 'Bonnet',
-                    description: 'Front bonnet section. Click to inspect front body detail.',
+                    description: 'Made from aerospace-grade magnesium, the GT3 RS hood is so light it makes carbon fibre look lazy by comparison.',
                     localPosition: [-12.15, 4.12, -15.0]
                 },
                 {
                     id: 'spoiler',
                     title: 'Spoiler',
-                    description: 'Rear spoiler area. Click to inspect rear aerodynamic detail.',
+                    description: 'Its swan-neck rear wing generates 409 kg of downforce, enough theoretical grip to literally drive upside down on a ceiling.',
                     localPosition: [-12.39, 4.56, -0.42]
                 },
                 {
                     id: 'door',
                     title: 'Door',
-                    description: 'Side door panel region. Click to inspect door detail.',
+                    description: 'The doors hide louvred air intakes that channel cool air into the wheel arches, keeping brakes from overheating during hard cornering.',
                     localPosition: [-8.28, 2.54, -9.22]
                 }
             ];
