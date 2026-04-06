@@ -45,9 +45,12 @@
         const detailHotspotPointer = new THREE.Vector2();
         const detailHotspotWorldPosition = new THREE.Vector3();
         const detailHotspotScreenPosition = new THREE.Vector3();
+        const doorTooltipWorldPosition = new THREE.Vector3();
+        const doorTooltipScreenPosition = new THREE.Vector3();
         let detailHotspotOverlay = null;
         let detailHotspotTitleEl = null;
         let detailHotspotBodyEl = null;
+        let doorEnterTooltipOverlay = null;
         let activeDetailHotspot = null;
         let detailHotspotInteractionReady = false;
         let detailHotspotsReady = false;
@@ -141,6 +144,18 @@
         const orbitOffset = new THREE.Vector3();
         const orbitHorizontal = new THREE.Vector3();
         const shadowBaseCenter = new THREE.Vector3();
+        const interiorCameraPosition = new THREE.Vector3(-10.61, 0.97, -5.68);
+        const interiorCameraTarget = new THREE.Vector3(-10.63, 0.00, -8.66);
+        const interiorAxisOffset = new THREE.Vector3(-1.24, 0, -1.72);
+        let interiorCameraPresetInitialized = true;
+        let cameraInteriorTransitionTween = null;
+        let interiorCameraActive = false;
+        const interiorCameraReturnPosition = new THREE.Vector3();
+        const interiorCameraReturnTarget = new THREE.Vector3();
+        const interiorDoorTargetsBeforeEntry = [];
+        const interiorPivotKeyframesBeforeEntry = [];
+        let interiorReturnSnapshotReady = false;
+        let interiorPivotSnapshotReady = false;
         let dragLastX = 0;
         let isShiftPressed = false;
         let isAltPressed = false;
@@ -148,6 +163,9 @@
         const smoothPivotEnabled = true;
         let shadowGroundBaseY = 0;
         let keyframeEditorReady = false;
+        let camInNudgeControlsReady = false;
+        let axisQuickControlsReady = false;
+        let axisManualControlsReady = false;
         const fixedShadowSettings = {
             opacity: 0.18,
             intensity: 0.18,
@@ -259,6 +277,8 @@
         const doorOpenAngle = THREE.MathUtils.degToRad(58);
         const doorAnimationDuration = 0.22;
         const doorSnapEpsilon = THREE.MathUtils.degToRad(0.08);
+        const doorEnterTooltipShowThreshold = 0.08;
+        const interiorCameraTransitionDuration = 0.62;
         let doorOpenDirectionMultiplier = 1;
         const caliperDebugStatus = [];
         let steeringControlsReady = false;
@@ -277,7 +297,7 @@
         const doorRearPattern = /(rear|back|aft|\brr\b|post|hinten)/i;
         const doorIgnorePattern = /(wheel|rim|tyre|tire|glass|window|mirror|handle|hood|bonnet|trunk|boot|bumper|fender|spoiler|roof|wiper|light|lamp|caliper)/i;
         const manualDoorGroupNodeNames = [
-            ['Object_471', 'Object_435', 'Object_84', 'Object_438', 'Object_138', 'Object_435', 'Object_414', 'Object_204', 'Object_276', 'Object_279','Object_183', 'Object_57','Object_147', 'Object_18', 'Object_411', 'Object_99', 'Object_171', 'Object_258', 'Object_207' ],
+            ['Object_471', 'Object_435', 'Object_84', 'Object_438','Object_180', 'Object_138', 'Object_435', 'Object_414', 'Object_204', 'Object_276', 'Object_279','Object_183', 'Object_57','Object_147', 'Object_18', 'Object_411', 'Object_99', 'Object_171', 'Object_258', 'Object_207' ],
             ['Object_420', 'Object_474', 'Object_141', 'Object_441', 'Object_87', 'Object_444', 'Object_90', 'Object_417', 'Object_201', 'Object_150','Object_24', 'Object_273', 'Object_186', 'Object_213', 'Object_282', 'Object_456', 'Object_177', 'Object_153', 'Object_63', 'Object_261']
         ];
         // Hardcoded hinge pivots in world space [x, y, z] for manual door groups.
@@ -659,6 +679,7 @@
 
                     applyPivotOffsetFromKeyframe(0);
                     applyLightFromKeyframe(0);
+                    initializeInteriorCameraPresetFromModel();
                     updateKeyframeEditorInputs();
 
                     // Add orbit controls for cursor interaction (but disable scrolling interference)
@@ -694,6 +715,7 @@
                     setupKeyframeEditorControls();
                     setupWheelControls();
                     setupDoorControls();
+                    setupDoorEnterTooltipOverlay();
                     setupWheelSteeringControls();
                     setupModelDragControls();
                     setupModelScrollAnimations(sections, modelRig, modelPivot);
@@ -824,6 +846,7 @@
 
             updateCyberpunkNeonRig(animationClock.elapsedTime);
             updateActiveDetailHotspotOverlay();
+            updateDoorEnterTooltipOverlay();
 
             if (composer) {
                 composer.render();
@@ -1814,6 +1837,345 @@
             });
         }
 
+        function initializeInteriorCameraPresetFromModel() {
+            if (interiorCameraPresetInitialized || !model) {
+                return;
+            }
+
+            model.updateMatrixWorld(true);
+            const modelBounds = new THREE.Box3().setFromObject(model);
+            if (!Number.isFinite(modelBounds.min.x)) {
+                return;
+            }
+
+            const modelSize = modelBounds.getSize(new THREE.Vector3());
+            const modelCenter = modelBounds.getCenter(new THREE.Vector3());
+
+            interiorCameraPosition.set(
+                modelCenter.x + modelSize.x * 0.16,
+                modelBounds.min.y + modelSize.y * 0.56,
+                modelCenter.z - modelSize.z * 0.14
+            );
+            interiorCameraTarget.set(
+                modelCenter.x + modelSize.x * 0.16,
+                modelBounds.min.y + modelSize.y * 0.52,
+                modelBounds.min.z + modelSize.z * 0.09
+            );
+
+            interiorCameraPresetInitialized = true;
+        }
+
+        function transitionCameraTo(targetPosition, targetLookAt, animate = true) {
+            if (!camera || !controls) {
+                return false;
+            }
+
+            if (cameraInteriorTransitionTween && typeof cameraInteriorTransitionTween.kill === 'function') {
+                cameraInteriorTransitionTween.kill();
+                cameraInteriorTransitionTween = null;
+            }
+
+            if (!animate || typeof gsap === 'undefined') {
+                camera.position.copy(targetPosition);
+                controls.target.copy(targetLookAt);
+                controls.update();
+                enforceCameraAboveGarageGround();
+                return true;
+            }
+
+            const state = {
+                px: camera.position.x,
+                py: camera.position.y,
+                pz: camera.position.z,
+                tx: controls.target.x,
+                ty: controls.target.y,
+                tz: controls.target.z
+            };
+
+            cameraInteriorTransitionTween = gsap.to(state, {
+                duration: interiorCameraTransitionDuration,
+                ease: 'power2.inOut',
+                px: targetPosition.x,
+                py: targetPosition.y,
+                pz: targetPosition.z,
+                tx: targetLookAt.x,
+                ty: targetLookAt.y,
+                tz: targetLookAt.z,
+                onUpdate: () => {
+                    camera.position.set(state.px, state.py, state.pz);
+                    controls.target.set(state.tx, state.ty, state.tz);
+                    controls.update();
+                    enforceCameraAboveGarageGround();
+                },
+                onComplete: () => {
+                    cameraInteriorTransitionTween = null;
+                }
+            });
+
+            return true;
+        }
+
+        function shiftCameraInsideCar(animate = true) {
+            return transitionCameraTo(interiorCameraPosition, interiorCameraTarget, animate);
+        }
+
+        function enterInteriorCameraMode(animate = true) {
+            if (!camera || !controls) {
+                return false;
+            }
+
+            if (!interiorCameraActive) {
+                interiorCameraReturnPosition.copy(camera.position);
+                interiorCameraReturnTarget.copy(controls.target);
+                interiorDoorTargetsBeforeEntry.length = 0;
+                for (const door of doorRigs) {
+                    interiorDoorTargetsBeforeEntry.push(door.targetRotationY);
+                }
+
+                interiorPivotKeyframesBeforeEntry.length = 0;
+                const pivotSectionCount = Math.max(1, sections.length);
+                for (let index = 0; index < pivotSectionCount; index += 1) {
+                    const pivotFrame = getPivotKeyframe(index);
+                    interiorPivotKeyframesBeforeEntry.push([
+                        Number(pivotFrame[0]) || 0,
+                        Number(pivotFrame[1]) || 0,
+                        Number(pivotFrame[2]) || 0
+                    ]);
+                }
+
+                interiorReturnSnapshotReady = true;
+                interiorPivotSnapshotReady = true;
+            }
+
+            interiorCameraActive = true;
+            setActiveSectionPivotAxisValues(
+                interiorAxisOffset.x,
+                interiorAxisOffset.y,
+                interiorAxisOffset.z
+            );
+            setDoorOpenState(false);
+            return shiftCameraInsideCar(animate);
+        }
+
+        function resetInteriorCameraMode(animate = true) {
+            if (!interiorCameraActive) {
+                return false;
+            }
+
+            interiorCameraActive = false;
+
+            if (interiorReturnSnapshotReady && interiorDoorTargetsBeforeEntry.length === doorRigs.length) {
+                for (let index = 0; index < doorRigs.length; index += 1) {
+                    doorRigs[index].targetRotationY = interiorDoorTargetsBeforeEntry[index];
+                }
+            } else {
+                setDoorOpenState(false);
+            }
+
+            if (interiorPivotSnapshotReady && interiorPivotKeyframesBeforeEntry.length) {
+                for (let index = 0; index < interiorPivotKeyframesBeforeEntry.length; index += 1) {
+                    const savedFrame = interiorPivotKeyframesBeforeEntry[index];
+                    if (!Array.isArray(savedFrame) || savedFrame.length < 3) {
+                        continue;
+                    }
+
+                    if (!Array.isArray(pivotKeyframes[index]) || pivotKeyframes[index].length < 3) {
+                        pivotKeyframes[index] = [savedFrame[0], savedFrame[1], savedFrame[2]];
+                        continue;
+                    }
+
+                    pivotKeyframes[index][0] = savedFrame[0];
+                    pivotKeyframes[index][1] = savedFrame[1];
+                    pivotKeyframes[index][2] = savedFrame[2];
+                }
+
+                activeSectionIndex = getCurrentSectionIndex();
+                applyPivotOffsetFromKeyframe(activeSectionIndex);
+                refreshModelTimeline();
+            }
+
+            const restored = interiorReturnSnapshotReady
+                ? transitionCameraTo(interiorCameraReturnPosition, interiorCameraReturnTarget, animate)
+                : false;
+
+            interiorReturnSnapshotReady = false;
+            interiorDoorTargetsBeforeEntry.length = 0;
+            interiorPivotSnapshotReady = false;
+            interiorPivotKeyframesBeforeEntry.length = 0;
+            updateKeyframeEditorInputs();
+            return restored || true;
+        }
+
+        function getMostOpenDoorState() {
+            let activeDoor = null;
+            let highestOpenRatio = 0;
+
+            for (const door of doorRigs) {
+                const rotationSpan = Math.abs(door.openRotationY - door.closedRotationY);
+                if (rotationSpan < 0.000001) {
+                    continue;
+                }
+
+                const openRatio = THREE.MathUtils.clamp(
+                    Math.abs(door.currentRotationY - door.closedRotationY) / rotationSpan,
+                    0,
+                    1
+                );
+
+                if (openRatio > highestOpenRatio) {
+                    highestOpenRatio = openRatio;
+                    activeDoor = door;
+                }
+            }
+
+            return {
+                door: activeDoor,
+                openRatio: highestOpenRatio
+            };
+        }
+
+        function canShiftCameraInsideFromDoorState() {
+            const openState = getMostOpenDoorState();
+            if (!openState.door) {
+                return false;
+            }
+
+            const doorIsTargetingOpen = Math.abs(openState.door.targetRotationY - openState.door.openRotationY) < 0.0005;
+            return doorIsTargetingOpen || openState.openRatio >= doorEnterTooltipShowThreshold;
+        }
+
+        function hideDoorEnterTooltipOverlay() {
+            if (!doorEnterTooltipOverlay) {
+                return;
+            }
+
+            doorEnterTooltipOverlay.style.display = 'none';
+            doorEnterTooltipOverlay.style.opacity = '0';
+            doorEnterTooltipOverlay.style.transform = 'translate(-50%, -50%) scale(0.82)';
+        }
+
+        function setupDoorEnterTooltipOverlay() {
+            if (doorEnterTooltipOverlay) {
+                return;
+            }
+
+            const flickerStyleId = 'door-enter-flicker-style';
+            if (!document.getElementById(flickerStyleId)) {
+                const flickerStyle = document.createElement('style');
+                flickerStyle.id = flickerStyleId;
+                flickerStyle.textContent = `
+@keyframes door-enter-flicker {
+    0%, 12%, 19%, 25%, 53%, 58%, 100% { opacity: 1; filter: brightness(1); }
+    14%, 56% { opacity: 0.22; filter: brightness(1.8); }
+    16%, 27%, 60% { opacity: 0.82; filter: brightness(1.3); }
+}`;
+                document.head.appendChild(flickerStyle);
+            }
+
+            doorEnterTooltipOverlay = document.createElement('div');
+            doorEnterTooltipOverlay.textContent = 'Enter';
+            doorEnterTooltipOverlay.style.position = 'fixed';
+            doorEnterTooltipOverlay.style.zIndex = '1060';
+            doorEnterTooltipOverlay.style.padding = '7px 11px';
+            doorEnterTooltipOverlay.style.borderRadius = '999px';
+            doorEnterTooltipOverlay.style.border = '1px solid rgba(255, 255, 255, 0.6)';
+            doorEnterTooltipOverlay.style.background = 'rgba(0, 0, 0, 0.82)';
+            doorEnterTooltipOverlay.style.color = '#ffffff';
+            doorEnterTooltipOverlay.style.fontFamily = 'monospace';
+            doorEnterTooltipOverlay.style.fontSize = '12px';
+            doorEnterTooltipOverlay.style.fontWeight = '700';
+            doorEnterTooltipOverlay.style.letterSpacing = '0.07em';
+            doorEnterTooltipOverlay.style.textTransform = 'uppercase';
+            doorEnterTooltipOverlay.style.pointerEvents = 'none';
+            doorEnterTooltipOverlay.style.boxShadow = '0 0 18px rgba(230, 240, 255, 0.45), inset 0 0 10px rgba(255, 255, 255, 0.24)';
+            doorEnterTooltipOverlay.style.left = '0px';
+            doorEnterTooltipOverlay.style.top = '0px';
+            doorEnterTooltipOverlay.style.opacity = '0';
+            doorEnterTooltipOverlay.style.transform = 'translate(-50%, -50%) scale(0.82)';
+            doorEnterTooltipOverlay.style.transition = 'opacity 170ms ease, transform 170ms ease';
+            doorEnterTooltipOverlay.style.animation = 'door-enter-flicker 0.85s steps(2, end) infinite';
+
+            document.body.appendChild(doorEnterTooltipOverlay);
+        }
+
+        function updateDoorEnterTooltipOverlay() {
+            if (!doorEnterTooltipOverlay || !camera) {
+                hideDoorEnterTooltipOverlay();
+                return;
+            }
+
+            if (interiorCameraActive) {
+                doorEnterTooltipOverlay.textContent = 'Esc to escape';
+                doorEnterTooltipOverlay.style.display = 'block';
+                doorEnterTooltipOverlay.style.left = `${Math.round(window.innerWidth * 0.5)}px`;
+                doorEnterTooltipOverlay.style.top = `${Math.round(window.innerHeight - 48)}px`;
+                doorEnterTooltipOverlay.style.opacity = '1';
+                doorEnterTooltipOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+                return;
+            }
+
+            if (!doorRigs.length) {
+                hideDoorEnterTooltipOverlay();
+                return;
+            }
+
+            const openState = getMostOpenDoorState();
+            const activeDoor = openState.door;
+            const highestOpenRatio = openState.openRatio;
+            const doorIsTargetingOpen = activeDoor
+                ? Math.abs(activeDoor.targetRotationY - activeDoor.openRotationY) < 0.0005
+                : false;
+
+            if (
+                !activeDoor
+                || !activeDoor.pivot
+                || !activeDoor.tooltipAnchorLocal
+                || !doorIsTargetingOpen
+                || highestOpenRatio < doorEnterTooltipShowThreshold
+            ) {
+                hideDoorEnterTooltipOverlay();
+                return;
+            }
+
+            doorTooltipWorldPosition.copy(activeDoor.tooltipAnchorLocal);
+            activeDoor.pivot.localToWorld(doorTooltipWorldPosition);
+
+            const lateralOffset = Number.isFinite(activeDoor.tooltipOffsetDistance)
+                ? activeDoor.tooltipOffsetDistance
+                : 0.22;
+            if (activeDoor.lateralAxis === 'z') {
+                doorTooltipWorldPosition.z += activeDoor.side === 'left' ? lateralOffset : -lateralOffset;
+            } else {
+                doorTooltipWorldPosition.x += activeDoor.side === 'left' ? lateralOffset : -lateralOffset;
+            }
+
+            doorTooltipWorldPosition.y += Number.isFinite(activeDoor.tooltipVerticalOffset)
+                ? activeDoor.tooltipVerticalOffset
+                : 0.12;
+
+            doorTooltipScreenPosition.copy(doorTooltipWorldPosition).project(camera);
+            const isVisible = doorTooltipScreenPosition.z > -1 && doorTooltipScreenPosition.z < 1;
+            if (!isVisible) {
+                hideDoorEnterTooltipOverlay();
+                return;
+            }
+
+            const screenX = (doorTooltipScreenPosition.x * 0.5 + 0.5) * window.innerWidth;
+            const screenY = (-doorTooltipScreenPosition.y * 0.5 + 0.5) * window.innerHeight;
+            const margin = 10;
+            const clampedLeft = THREE.MathUtils.clamp(screenX, margin, window.innerWidth - margin);
+            const clampedTop = THREE.MathUtils.clamp(screenY - 16, margin, window.innerHeight - margin);
+            const scale = 0.82 + highestOpenRatio * 0.24;
+            const opacity = THREE.MathUtils.clamp(0.32 + highestOpenRatio * 0.68, 0, 1);
+
+            doorEnterTooltipOverlay.textContent = 'Enter';
+            doorEnterTooltipOverlay.style.display = 'block';
+            doorEnterTooltipOverlay.style.left = `${Math.round(clampedLeft)}px`;
+            doorEnterTooltipOverlay.style.top = `${Math.round(clampedTop)}px`;
+            doorEnterTooltipOverlay.style.opacity = opacity.toFixed(3);
+            doorEnterTooltipOverlay.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+        }
+
         function setupDetailHotspotOverlay() {
             if (detailHotspotOverlay) {
                 return;
@@ -2596,6 +2958,7 @@
 
                 const doorRig = {
                     node: attachNodes[0],
+                    attachedNodes: attachNodes,
                     pivot: doorPivot,
                     pivotMarker,
                     markerColor,
@@ -2603,6 +2966,7 @@
                     side,
                     segment,
                     source,
+                    lateralAxis,
                     openingDirection,
                     closedRotationY,
                     openRotationY,
@@ -2610,10 +2974,14 @@
                         ? options.manualDoorGroupIndex
                         : null,
                     currentRotationY: closedRotationY,
-                    targetRotationY: closedRotationY
+                    targetRotationY: closedRotationY,
+                    tooltipAnchorLocal: null,
+                    tooltipOffsetDistance: 0.22,
+                    tooltipVerticalOffset: 0.12
                 };
 
                 doorRigs.push(doorRig);
+                refreshDoorRigTooltipAnchor(doorRig);
                 if (enableDoorAnalysisLogs) {
                     doorAnalysisRows.push({
                         name,
@@ -2912,8 +3280,9 @@
                 const openingDirection = (candidate.side === 'left' ? 1 : -1) * doorOpenDirectionMultiplier;
                 const openRotationY = closedRotationY + openingDirection * doorOpenAngle;
 
-                doorRigs.push({
+                const autoDoorRig = {
                     node: targetNode,
+                    attachedNodes: [targetNode],
                     pivot: doorPivot,
                     pivotMarker,
                     markerColor,
@@ -2921,12 +3290,18 @@
                     side: candidate.side,
                     segment: candidate.segment,
                     source: candidate.source,
+                    lateralAxis,
                     openingDirection,
                     closedRotationY,
                     openRotationY,
                     currentRotationY: closedRotationY,
-                    targetRotationY: closedRotationY
-                });
+                    targetRotationY: closedRotationY,
+                    tooltipAnchorLocal: null,
+                    tooltipOffsetDistance: 0.22,
+                    tooltipVerticalOffset: 0.12
+                };
+                doorRigs.push(autoDoorRig);
+                refreshDoorRigTooltipAnchor(autoDoorRig);
             }
 
             if (enableDoorAnalysisLogs) {
@@ -2966,6 +3341,49 @@
             updateDoorDebugInfo();
         }
 
+        function refreshDoorRigTooltipAnchor(doorRig) {
+            if (!doorRig || !doorRig.pivot) {
+                return false;
+            }
+
+            const sourceNodes = Array.isArray(doorRig.attachedNodes) && doorRig.attachedNodes.length
+                ? doorRig.attachedNodes
+                : (doorRig.node ? [doorRig.node] : []);
+            if (!sourceNodes.length) {
+                return false;
+            }
+
+            const doorBounds = new THREE.Box3();
+            let hasBounds = false;
+            for (const node of sourceNodes) {
+                const nodeBounds = new THREE.Box3().setFromObject(node);
+                if (!Number.isFinite(nodeBounds.min.x)) {
+                    continue;
+                }
+
+                if (!hasBounds) {
+                    doorBounds.copy(nodeBounds);
+                    hasBounds = true;
+                } else {
+                    doorBounds.union(nodeBounds);
+                }
+            }
+
+            if (!hasBounds) {
+                return false;
+            }
+
+            const doorSize = doorBounds.getSize(new THREE.Vector3());
+            const doorCenter = doorBounds.getCenter(new THREE.Vector3());
+            doorCenter.y = doorBounds.min.y + doorSize.y * 0.62;
+
+            doorRig.tooltipAnchorLocal = doorRig.pivot.worldToLocal(doorCenter.clone());
+            const lateralSize = doorRig.lateralAxis === 'z' ? doorSize.z : doorSize.x;
+            doorRig.tooltipOffsetDistance = Math.max(0.18, Math.min(0.72, lateralSize * 0.36));
+            doorRig.tooltipVerticalOffset = Math.max(0.08, Math.min(0.34, doorSize.y * 0.12));
+            return true;
+        }
+
         function setDoorPivotMarkerVisibility(visible) {
             doorPivotMarkersVisible = Boolean(visible);
 
@@ -2995,6 +3413,7 @@
                 pivot.attach(child);
             }
 
+            refreshDoorRigTooltipAnchor(doorRig);
             return true;
         }
 
@@ -3184,6 +3603,11 @@
                 }
 
                 const key = String(event.key || '').toLowerCase();
+                if (interiorCameraActive && (key === 'k' || key === 'l' || key === 'j' || key === '5')) {
+                    event.preventDefault();
+                    return;
+                }
+
                 let handled = false;
                 let doorSoundAction = null;
                 if (key === 'k') {
@@ -3229,6 +3653,16 @@
                         handled = togglePrimaryManualDoor();
                         doorSoundAction = isOpen ? 'close' : 'open';
                     }
+                } else if (key === 'enter') {
+                    const anyOpen = doorRigs.some((door) =>
+                        Math.abs(door.targetRotationY - door.closedRotationY) > 0.0005
+                    );
+                    handled = enterInteriorCameraMode(true);
+                    if (handled && anyOpen) {
+                        doorSoundAction = 'close';
+                    }
+                } else if (key === 'escape') {
+                    handled = resetInteriorCameraMode(true);
                 }
 
                 if (!handled) {
@@ -3254,6 +3688,10 @@
         function updateDoorAnimation(deltaTime) {
             if (!doorRigs.length) {
                 return false;
+            }
+
+            if (interiorCameraActive) {
+                setDoorOpenState(false);
             }
 
             const safeDuration = Math.max(0.001, doorAnimationDuration);
@@ -4435,6 +4873,374 @@
             input.value = Number(value).toFixed(liveDecimals);
         }
 
+        function getCamInNudgeStep() {
+            const stepInput = document.getElementById('cam-step');
+            const fallbackStep = 0.02;
+
+            if (!stepInput) {
+                return fallbackStep;
+            }
+
+            const parsed = parseFloat(stepInput.value);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                stepInput.value = fallbackStep.toFixed(3);
+                return fallbackStep;
+            }
+
+            return parsed;
+        }
+
+        function nudgeInteriorCameraPosition(dx, dy, dz) {
+            interiorCameraPosition.x += dx;
+            interiorCameraPosition.y += dy;
+            interiorCameraPosition.z += dz;
+            shiftCameraInsideCar(false);
+            updateKeyframeEditorInputs();
+        }
+
+        function nudgeInteriorCameraTarget(dx, dy, dz) {
+            interiorCameraTarget.x += dx;
+            interiorCameraTarget.y += dy;
+            interiorCameraTarget.z += dz;
+            shiftCameraInsideCar(false);
+            updateKeyframeEditorInputs();
+        }
+
+        function setupCamInNudgeControls() {
+            if (camInNudgeControlsReady) {
+                return;
+            }
+
+            const stepInput = document.getElementById('cam-step');
+            const requiredButtonIds = [
+                'cam-pos-x-neg',
+                'cam-pos-x-pos',
+                'cam-pos-y-neg',
+                'cam-pos-y-pos',
+                'cam-pos-z-neg',
+                'cam-pos-z-pos',
+                'cam-tgt-x-neg',
+                'cam-tgt-x-pos',
+                'cam-tgt-y-neg',
+                'cam-tgt-y-pos',
+                'cam-tgt-z-neg',
+                'cam-tgt-z-pos',
+                'cam-capture-current',
+                'cam-preview'
+            ];
+
+            if (!stepInput || requiredButtonIds.some((id) => !document.getElementById(id))) {
+                return;
+            }
+
+            camInNudgeControlsReady = true;
+
+            const bindButton = (buttonId, handler) => {
+                const button = document.getElementById(buttonId);
+                if (!button) {
+                    return;
+                }
+
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    handler();
+                });
+            };
+
+            bindButton('cam-pos-x-neg', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraPosition(-step, 0, 0);
+            });
+            bindButton('cam-pos-x-pos', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraPosition(step, 0, 0);
+            });
+            bindButton('cam-pos-y-neg', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraPosition(0, -step, 0);
+            });
+            bindButton('cam-pos-y-pos', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraPosition(0, step, 0);
+            });
+            bindButton('cam-pos-z-neg', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraPosition(0, 0, -step);
+            });
+            bindButton('cam-pos-z-pos', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraPosition(0, 0, step);
+            });
+
+            bindButton('cam-tgt-x-neg', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraTarget(-step, 0, 0);
+            });
+            bindButton('cam-tgt-x-pos', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraTarget(step, 0, 0);
+            });
+            bindButton('cam-tgt-y-neg', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraTarget(0, -step, 0);
+            });
+            bindButton('cam-tgt-y-pos', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraTarget(0, step, 0);
+            });
+            bindButton('cam-tgt-z-neg', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraTarget(0, 0, -step);
+            });
+            bindButton('cam-tgt-z-pos', () => {
+                const step = getCamInNudgeStep();
+                nudgeInteriorCameraTarget(0, 0, step);
+            });
+
+            bindButton('cam-capture-current', () => {
+                if (!camera || !controls) {
+                    return;
+                }
+
+                interiorCameraPosition.copy(camera.position);
+                interiorCameraTarget.copy(controls.target);
+                updateKeyframeEditorInputs();
+            });
+
+            bindButton('cam-preview', () => {
+                shiftCameraInsideCar(false);
+                updateKeyframeEditorInputs();
+            });
+        }
+
+        function setActiveSectionPivotAxisValues(axisX, axisY, axisZ) {
+            if (!Number.isFinite(axisX) || !Number.isFinite(axisY) || !Number.isFinite(axisZ)) {
+                return false;
+            }
+
+            activeSectionIndex = getCurrentSectionIndex();
+            const pivotFrame = getPivotKeyframe(activeSectionIndex);
+            pivotFrame[0] = parseFloat(axisX.toFixed(2));
+            pivotFrame[1] = parseFloat(axisY.toFixed(2));
+            pivotFrame[2] = parseFloat(axisZ.toFixed(2));
+            pivotKeyframes[activeSectionIndex] = pivotFrame;
+
+            applyPivotOffsetFromKeyframe(activeSectionIndex);
+            refreshModelTimeline();
+            updateKeyframeEditorInputs();
+            return true;
+        }
+
+        function setActiveSectionPivotAxisFromLocalPoint(localPoint) {
+            if (!localPoint || !Number.isFinite(localPoint.x) || !Number.isFinite(localPoint.y) || !Number.isFinite(localPoint.z)) {
+                return false;
+            }
+
+            return setActiveSectionPivotAxisValues(localPoint.x, localPoint.y, localPoint.z);
+        }
+
+        function estimateSteeringWheelLocalPivot() {
+            if (!model) {
+                return null;
+            }
+
+            model.updateMatrixWorld(true);
+            const steerPattern = /(steer|steering)/i;
+            const roadWheelPattern = /(tyre|tire|rim|rotor|hub|disc|brake|caliper|front[_\s-]*wheel|rear[_\s-]*wheel)/i;
+            let bestCenterWorld = null;
+            let bestScore = Number.NEGATIVE_INFINITY;
+
+            model.traverse((node) => {
+                if (!node || !node.isObject3D) {
+                    return;
+                }
+
+                const label = getNodeHierarchyLabel(node, 8);
+                if (!steerPattern.test(label) || roadWheelPattern.test(label)) {
+                    return;
+                }
+
+                const bounds = new THREE.Box3().setFromObject(node);
+                if (!Number.isFinite(bounds.min.x)) {
+                    return;
+                }
+
+                const size = bounds.getSize(new THREE.Vector3());
+                const center = bounds.getCenter(new THREE.Vector3());
+                const volume = Math.max(0.000001, size.x * size.y * size.z);
+                const compactnessScore = 1 / Math.cbrt(volume);
+                const score = compactnessScore * 6 + center.y * 0.25;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestCenterWorld = center.clone();
+                }
+            });
+
+            if (bestCenterWorld) {
+                return model.worldToLocal(bestCenterWorld.clone());
+            }
+
+            const fallbackWorld = interiorCameraPosition.clone().lerp(interiorCameraTarget, 0.4);
+            return model.worldToLocal(fallbackWorld);
+        }
+
+        function setupAxisQuickControls() {
+            if (axisQuickControlsReady) {
+                return;
+            }
+
+            const steeringButton = document.getElementById('axis-to-steering');
+            const camTargetButton = document.getElementById('axis-to-cam-target');
+            if (!steeringButton || !camTargetButton) {
+                return;
+            }
+
+            axisQuickControlsReady = true;
+
+            steeringButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                const localPoint = estimateSteeringWheelLocalPivot();
+                setActiveSectionPivotAxisFromLocalPoint(localPoint);
+            });
+
+            camTargetButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (!model) {
+                    return;
+                }
+
+                const localPoint = model.worldToLocal(interiorCameraTarget.clone());
+                setActiveSectionPivotAxisFromLocalPoint(localPoint);
+            });
+        }
+
+        function getAxisNudgeStep() {
+            const stepInput = document.getElementById('axis-step');
+            const fallbackStep = 0.02;
+
+            if (!stepInput) {
+                return fallbackStep;
+            }
+
+            const parsed = parseFloat(stepInput.value);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                stepInput.value = fallbackStep.toFixed(3);
+                return fallbackStep;
+            }
+
+            return parsed;
+        }
+
+        function nudgeActiveSectionPivotAxis(dx, dy, dz) {
+            activeSectionIndex = getCurrentSectionIndex();
+            const pivotFrame = getPivotKeyframe(activeSectionIndex);
+            return setActiveSectionPivotAxisValues(
+                pivotFrame[0] + dx,
+                pivotFrame[1] + dy,
+                pivotFrame[2] + dz
+            );
+        }
+
+        function applyActiveAxisToAllSections() {
+            activeSectionIndex = getCurrentSectionIndex();
+            const sourceFrame = getPivotKeyframe(activeSectionIndex);
+            const targetX = parseFloat(sourceFrame[0].toFixed(2));
+            const targetY = parseFloat(sourceFrame[1].toFixed(2));
+            const targetZ = parseFloat(sourceFrame[2].toFixed(2));
+            const sectionCount = Math.max(1, sections.length);
+
+            for (let index = 0; index < sectionCount; index += 1) {
+                if (!Array.isArray(pivotKeyframes[index]) || pivotKeyframes[index].length < 3) {
+                    pivotKeyframes[index] = [targetX, targetY, targetZ];
+                    continue;
+                }
+
+                pivotKeyframes[index][0] = targetX;
+                pivotKeyframes[index][1] = targetY;
+                pivotKeyframes[index][2] = targetZ;
+            }
+
+            applyPivotOffsetFromKeyframe(activeSectionIndex);
+            refreshModelTimeline();
+            updateKeyframeEditorInputs();
+            return true;
+        }
+
+        function setupAxisManualControls() {
+            if (axisManualControlsReady) {
+                return;
+            }
+
+            const stepInput = document.getElementById('axis-step');
+            const requiredButtonIds = [
+                'axis-x-neg',
+                'axis-x-pos',
+                'axis-y-neg',
+                'axis-y-pos',
+                'axis-z-neg',
+                'axis-z-pos',
+                'axis-grab-current',
+                'axis-apply-all'
+            ];
+
+            if (!stepInput || requiredButtonIds.some((id) => !document.getElementById(id))) {
+                return;
+            }
+
+            axisManualControlsReady = true;
+
+            const bindButton = (buttonId, handler) => {
+                const button = document.getElementById(buttonId);
+                if (!button) {
+                    return;
+                }
+
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    handler();
+                });
+            };
+
+            bindButton('axis-x-neg', () => {
+                const step = getAxisNudgeStep();
+                nudgeActiveSectionPivotAxis(-step, 0, 0);
+            });
+            bindButton('axis-x-pos', () => {
+                const step = getAxisNudgeStep();
+                nudgeActiveSectionPivotAxis(step, 0, 0);
+            });
+            bindButton('axis-y-neg', () => {
+                const step = getAxisNudgeStep();
+                nudgeActiveSectionPivotAxis(0, -step, 0);
+            });
+            bindButton('axis-y-pos', () => {
+                const step = getAxisNudgeStep();
+                nudgeActiveSectionPivotAxis(0, step, 0);
+            });
+            bindButton('axis-z-neg', () => {
+                const step = getAxisNudgeStep();
+                nudgeActiveSectionPivotAxis(0, 0, -step);
+            });
+            bindButton('axis-z-pos', () => {
+                const step = getAxisNudgeStep();
+                nudgeActiveSectionPivotAxis(0, 0, step);
+            });
+
+            bindButton('axis-grab-current', () => {
+                if (!model || !controls) {
+                    return;
+                }
+
+                const localPoint = model.worldToLocal(controls.target.clone());
+                setActiveSectionPivotAxisFromLocalPoint(localPoint);
+            });
+
+            bindButton('axis-apply-all', () => {
+                applyActiveAxisToAllSections();
+            });
+        }
+
         function refreshModelTimeline() {
             if (!modelRig || !modelPivot) {
                 return;
@@ -4470,6 +5276,16 @@
             setInputValue('light-x', activeLightFrame[0]);
             setInputValue('light-y', activeLightFrame[1]);
             setInputValue('light-z', activeLightFrame[2]);
+
+            setInputValue('cam-x', interiorCameraPosition.x);
+            setInputValue('cam-y', interiorCameraPosition.y);
+            setInputValue('cam-z', interiorCameraPosition.z);
+            setInputValue('cam-tx', interiorCameraTarget.x);
+            setInputValue('cam-ty', interiorCameraTarget.y);
+            setInputValue('cam-tz', interiorCameraTarget.z);
+            setInputValue('cam-ax', interiorCameraTarget.x - interiorCameraPosition.x);
+            setInputValue('cam-ay', interiorCameraTarget.y - interiorCameraPosition.y);
+            setInputValue('cam-az', interiorCameraTarget.z - interiorCameraPosition.z);
         }
 
         function setupKeyframeEditorControls() {
@@ -4600,6 +5416,55 @@
                     applyLightFromKeyframe(sectionIndex);
                 }
             });
+
+            bindInput('cam-x', (value) => {
+                interiorCameraPosition.x = value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-y', (value) => {
+                interiorCameraPosition.y = value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-z', (value) => {
+                interiorCameraPosition.z = value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-tx', (value) => {
+                interiorCameraTarget.x = value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-ty', (value) => {
+                interiorCameraTarget.y = value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-tz', (value) => {
+                interiorCameraTarget.z = value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-ax', (value) => {
+                interiorCameraTarget.x = interiorCameraPosition.x + value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-ay', (value) => {
+                interiorCameraTarget.y = interiorCameraPosition.y + value;
+                shiftCameraInsideCar(false);
+            });
+
+            bindInput('cam-az', (value) => {
+                interiorCameraTarget.z = interiorCameraPosition.z + value;
+                shiftCameraInsideCar(false);
+            });
+
+            setupCamInNudgeControls();
+            setupAxisQuickControls();
+            setupAxisManualControls();
         }
 
         function syncPivotOffsetToSection() {

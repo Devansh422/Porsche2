@@ -20,12 +20,17 @@
     </div>
 
     <!-- Debug Info (always on top) -->
-    <div id="debug-info" style=" display: none; position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
+    <div id="debug-info" style="position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; font-family: monospace; z-index: 1000; pointer-events: auto;">
         <div>Section: <span id="model-section">1 / 1</span></div>
         <div>Position: X <input id="pos-x" type="number" step="0.01" style="width:72px;"> Y <input id="pos-y" type="number" step="0.01" style="width:72px;"> Z <input id="pos-z" type="number" step="0.01" style="width:72px;"></div>
         <div>Rotation: X <input id="rot-x" type="number" step="0.01" style="width:72px;"> Y <input id="rot-y" type="number" step="0.01" style="width:72px;"> Z <input id="rot-z" type="number" step="0.01" style="width:72px;"></div>
         <div>Axis: X <input id="axis-x" type="number" step="0.01" style="width:72px;"> Y <input id="axis-y" type="number" step="0.01" style="width:72px;"> Z <input id="axis-z" type="number" step="0.01" style="width:72px;"></div>
+        <div>Axis Tools: <button id="axis-to-steering" type="button" style="width:98px;">Steering</button> <button id="axis-to-cam-target" type="button" style="width:112px;">Cam Target</button></div>
+        <div>Axis Manual: Step <input id="axis-step" type="number" step="0.005" value="0.02" style="width:62px;"> <button id="axis-x-neg" type="button" style="width:34px;">X-</button> <button id="axis-x-pos" type="button" style="width:34px;">X+</button> <button id="axis-y-neg" type="button" style="width:34px;">Y-</button> <button id="axis-y-pos" type="button" style="width:34px;">Y+</button> <button id="axis-z-neg" type="button" style="width:34px;">Z-</button> <button id="axis-z-pos" type="button" style="width:34px;">Z+</button> <button id="axis-grab-current" type="button" style="width:66px;">Grab Cam</button> <button id="axis-apply-all" type="button" style="width:88px;">All Sections</button></div>
         <div>Light: X <input id="light-x" type="number" step="0.01" style="width:72px;"> Y <input id="light-y" type="number" step="0.01" style="width:72px;"> Z <input id="light-z" type="number" step="0.01" style="width:72px;"></div>
+        <div>Cam In: X <input id="cam-x" type="number" step="0.01" style="width:62px;"> Y <input id="cam-y" type="number" step="0.01" style="width:62px;"> Z <input id="cam-z" type="number" step="0.01" style="width:62px;"> Tx <input id="cam-tx" type="number" step="0.01" style="width:62px;"> Ty <input id="cam-ty" type="number" step="0.01" style="width:62px;"> Tz <input id="cam-tz" type="number" step="0.01" style="width:62px;"> Ax <input id="cam-ax" type="number" step="0.01" style="width:62px;"> Ay <input id="cam-ay" type="number" step="0.01" style="width:62px;"> Az <input id="cam-az" type="number" step="0.01" style="width:62px;"></div>
+        <div>Cam In Pos Nudge: Step <input id="cam-step" type="number" step="0.005" value="0.02" style="width:62px;"> <button id="cam-pos-x-neg" type="button" style="width:34px;">X-</button> <button id="cam-pos-x-pos" type="button" style="width:34px;">X+</button> <button id="cam-pos-y-neg" type="button" style="width:34px;">Y-</button> <button id="cam-pos-y-pos" type="button" style="width:34px;">Y+</button> <button id="cam-pos-z-neg" type="button" style="width:34px;">Z-</button> <button id="cam-pos-z-pos" type="button" style="width:34px;">Z+</button></div>
+        <div>Cam In Aim Nudge: <button id="cam-tgt-x-neg" type="button" style="width:36px;">Tx-</button> <button id="cam-tgt-x-pos" type="button" style="width:36px;">Tx+</button> <button id="cam-tgt-y-neg" type="button" style="width:36px;">Ty-</button> <button id="cam-tgt-y-pos" type="button" style="width:36px;">Ty+</button> <button id="cam-tgt-z-neg" type="button" style="width:36px;">Tz-</button> <button id="cam-tgt-z-pos" type="button" style="width:36px;">Tz+</button> <button id="cam-capture-current" type="button" style="width:58px;">Grab</button> <button id="cam-preview" type="button" style="width:58px;">Preview</button></div>
         <div>Neon: <select id="neon-target" style="width:64px;"></select> X <input id="neon-x" type="number" step="0.01" style="width:62px;"> Y <input id="neon-y" type="number" step="0.01" style="width:62px;"> Z <input id="neon-z" type="number" step="0.01" style="width:62px;"></div>
         <div>Neon Params: I <input id="neon-intensity" type="number" step="0.1" style="width:62px;"> D <input id="neon-distance" type="number" step="0.1" style="width:62px;"> E <input id="neon-emissive" type="number" step="0.1" style="width:62px;"> A <input id="neon-amp" type="number" step="0.1" style="width:62px;"> S <input id="neon-speed" type="number" step="0.1" style="width:62px;"> P <input id="neon-phase" type="number" step="0.1" style="width:62px;"> Rx <input id="neon-rx" type="number" step="0.01" style="width:62px;"> Ry <input id="neon-ry" type="number" step="0.01" style="width:62px;"> Rz <input id="neon-rz" type="number" step="0.01" style="width:62px;"></div>
         <div>Points: <select id="point-target" style="width:72px;"></select> X <input id="point-x" type="number" step="0.01" style="width:62px;"> Y <input id="point-y" type="number" step="0.01" style="width:62px;"> Z <input id="point-z" type="number" step="0.01" style="width:62px;"></div>
@@ -34,6 +39,7 @@
         <div>Debug Panel: Press H to show/hide</div>
         <div>Wheel Controls: T toggle, R faster, F slower, G stop</div>
         <div>Door Controls: K left, L right, J all, 0 close, 4 flip direction, 5 manual door</div>
+        <div>Enter View: Enter to get in, Esc to reset all</div>
         <div id="door-debug">Doors: analyzing...</div>
     </div>
 
@@ -43,6 +49,7 @@
         <div>- S to start engine</div>
         <div>- Scroll or Space to rev</div>
         <div>- J/K/L for opening doors</div>
+        <div>- Enter to sit inside, Esc to reset</div>
     </div>
 
     <div id="author-credit" style="position: fixed; right: 14px; bottom: 14px; z-index: 1150; padding: 6px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.72); border: 1px solid rgba(255, 255, 255, 0.28); color: #f4f8ff; font-family: monospace; font-size: 12px; letter-spacing: 0.03em; pointer-events: none; user-select: none;">Devansh Verma</div>
