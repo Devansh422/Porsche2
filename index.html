@@ -43,7 +43,7 @@
         <div id="door-debug">Doors: analyzing...</div>
     </div>
 
-    <div id="controls-tooltip" style="position: fixed; left: 14px; bottom: 14px; z-index: 1100; padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, 0.78); border: 1px solid rgba(255, 255, 255, 0.28); color: #f6f8ff; font-family: monospace; font-size: 12px; line-height: 1.45; letter-spacing: 0.01em; pointer-events: none;">
+    <div id="controls-tooltip" style="position: fixed; left: 14px; bottom: 58px; z-index: 1100; padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, 0.78); border: 1px solid rgba(255, 255, 255, 0.28); color: #f6f8ff; font-family: monospace; font-size: 12px; line-height: 1.45; letter-spacing: 0.01em; pointer-events: none;">
         <div style="font-weight: 700; margin-bottom: 4px;">Controls</div>
         <div>- Arrow keys to steer</div>
         <div>- S to start engine</div>
@@ -51,6 +51,8 @@
         <div>- J/K/L for opening doors</div>
         <div>- Enter to sit inside, Esc to reset</div>
     </div>
+
+    <button id="controls-toggle-button" type="button" aria-label="Toggle controls" aria-pressed="true">Hide Controls</button>
 
     <div id="mobile-rotate-overlay" aria-live="polite">
         <div class="mobile-rotate-card">

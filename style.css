@@ -67,6 +67,28 @@ body, html {
     display: none;
 }
 
+#controls-toggle-button {
+    position: fixed;
+    left: 14px;
+    bottom: 14px;
+    z-index: 1900;
+    border: 1px solid rgba(255, 255, 255, 0.36);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.78);
+    color: #f4f8ff;
+    font-family: monospace;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    padding: 8px 12px;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+}
+
+#controls-toggle-button:active {
+    transform: scale(0.98);
+}
+
 #mobile-rotate-overlay {
     position: fixed;
     inset: 0;
@@ -118,7 +140,7 @@ body, html {
     position: fixed;
     left: 10px;
     right: 10px;
-    bottom: 10px;
+    bottom: 56px;
     z-index: 1800;
     display: none;
     flex-direction: column;
@@ -185,6 +207,12 @@ body.mobile-device #controls-tooltip {
     #mobile-controls {
         left: 8px;
         right: 8px;
+        bottom: 52px;
+    }
+
+    #controls-toggle-button {
+        left: 8px;
         bottom: 8px;
+        padding: 8px 11px;
     }
 }

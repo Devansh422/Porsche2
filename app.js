@@ -361,6 +361,8 @@
         let authorCreditObserver = null;
         let authorCreditElementObserver = null;
         let authorCreditIntegrityIntervalId = null;
+        const controlsVisibilityStorageKey = 'porsche-controls-visible';
+        let controlsAreVisible = true;
         let mobileExperienceReady = false;
         const activeMobileHeldKeys = new Set();
         let mobileLandscapeLockAttempted = false;
@@ -368,6 +370,7 @@
         setupAuthorCreditProtection();
         setupDebugPanelToggle();
         setupEngineAudioControls();
+        setupControlsToggleButton();
         setupMobileExperience();
         initThreeJS();
         updateCaliperDebugInfo();
@@ -2021,6 +2024,63 @@
             });
 
             requestMobileLandscapeLock();
+        }
+
+        function getSavedControlsVisibility() {
+            try {
+                const savedValue = window.localStorage.getItem(controlsVisibilityStorageKey);
+                if (savedValue === 'hidden') {
+                    return false;
+                }
+
+                if (savedValue === 'visible') {
+                    return true;
+                }
+            } catch (error) {
+                // Ignore localStorage errors (private mode/restrictions).
+            }
+
+            return true;
+        }
+
+        function applyControlsVisibility(isVisible) {
+            controlsAreVisible = Boolean(isVisible);
+
+            const controlsTooltip = document.getElementById('controls-tooltip');
+            if (controlsTooltip) {
+                controlsTooltip.style.display = controlsAreVisible ? '' : 'none';
+            }
+
+            const mobileControls = document.getElementById('mobile-controls');
+            if (mobileControls) {
+                mobileControls.style.display = controlsAreVisible ? '' : 'none';
+            }
+
+            const toggleButton = document.getElementById('controls-toggle-button');
+            if (toggleButton) {
+                toggleButton.textContent = controlsAreVisible ? 'Hide Controls' : 'Show Controls';
+                toggleButton.setAttribute('aria-pressed', controlsAreVisible ? 'true' : 'false');
+            }
+
+            try {
+                window.localStorage.setItem(controlsVisibilityStorageKey, controlsAreVisible ? 'visible' : 'hidden');
+            } catch (error) {
+                // Ignore localStorage errors (private mode/restrictions).
+            }
+        }
+
+        function setupControlsToggleButton() {
+            const toggleButton = document.getElementById('controls-toggle-button');
+            if (!toggleButton) {
+                return;
+            }
+
+            controlsAreVisible = getSavedControlsVisibility();
+            applyControlsVisibility(controlsAreVisible);
+
+            toggleButton.addEventListener('click', () => {
+                applyControlsVisibility(!controlsAreVisible);
+            });
         }
 
         function initializeInteriorCameraPresetFromModel() {
