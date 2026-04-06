@@ -154,8 +154,11 @@
         const interiorCameraReturnTarget = new THREE.Vector3();
         const interiorDoorTargetsBeforeEntry = [];
         const interiorPivotKeyframesBeforeEntry = [];
+        const interiorOrbitBaseOffset = new THREE.Vector3();
+        const interiorOrbitSpherical = new THREE.Spherical();
         let interiorReturnSnapshotReady = false;
         let interiorPivotSnapshotReady = false;
+        let controlsOrbitStateBeforeInterior = null;
         let dragLastX = 0;
         let isShiftPressed = false;
         let isAltPressed = false;
@@ -175,6 +178,9 @@
         const defaultLightPoint = [20, 30, -20];
         const orbitMinPolarAngle = THREE.MathUtils.degToRad(5);
         const orbitMaxPolarAngle = THREE.MathUtils.degToRad(88);
+        const interiorOrbitAzimuthLimit = THREE.MathUtils.degToRad(34);
+        const interiorOrbitPolarLimit = THREE.MathUtils.degToRad(20);
+        const interiorOrbitDistanceTolerance = 0.12;
         const minimumCameraHeightAboveGarage = 0.18;
         const animationClock = new THREE.Clock();
         const wheelNamePattern = /(wheel|whl|tyre|tire|rim|trim|centerlock|hub|disc|disk|rotor)/i;
@@ -355,10 +361,14 @@
         let authorCreditObserver = null;
         let authorCreditElementObserver = null;
         let authorCreditIntegrityIntervalId = null;
+        let mobileExperienceReady = false;
+        const activeMobileHeldKeys = new Set();
+        let mobileLandscapeLockAttempted = false;
 
         setupAuthorCreditProtection();
         setupDebugPanelToggle();
         setupEngineAudioControls();
+        setupMobileExperience();
         initThreeJS();
         updateCaliperDebugInfo();
         animate();
@@ -1837,6 +1847,182 @@
             });
         }
 
+        function isMobileDeviceExperience() {
+            const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+            const userAgent = navigator.userAgent || '';
+            const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+            return coarsePointer || uaMobile;
+        }
+
+        function updateMobileOrientationState() {
+            if (!document.body.classList.contains('mobile-device')) {
+                return;
+            }
+
+            const isPortrait = window.innerHeight > window.innerWidth;
+            document.body.classList.toggle('mobile-portrait', isPortrait);
+        }
+
+        async function requestMobileLandscapeLock() {
+            if (typeof screen === 'undefined' || !screen.orientation || typeof screen.orientation.lock !== 'function') {
+                return;
+            }
+
+            if (mobileLandscapeLockAttempted && screen.orientation.type && screen.orientation.type.startsWith('landscape')) {
+                return;
+            }
+
+            mobileLandscapeLockAttempted = true;
+
+            try {
+                await screen.orientation.lock('landscape');
+            } catch (error) {
+                // Ignore platform/browser lock restrictions (common on iOS/Safari).
+            }
+
+            updateMobileOrientationState();
+        }
+
+        function dispatchMobileKeyToWindow(key, code, eventType = 'keydown') {
+            if (!key) {
+                return;
+            }
+
+            const eventInit = {
+                key,
+                bubbles: true,
+                cancelable: true
+            };
+
+            if (code) {
+                eventInit.code = code;
+            }
+
+            const keyboardEvent = new KeyboardEvent(eventType, eventInit);
+            window.dispatchEvent(keyboardEvent);
+        }
+
+        function triggerMobileTapKey(key, code) {
+            dispatchMobileKeyToWindow(key, code, 'keydown');
+            dispatchMobileKeyToWindow(key, code, 'keyup');
+        }
+
+        function getMobileHoldKeyToken(key, code) {
+            return `${key}::${code || ''}`;
+        }
+
+        function pressMobileHoldKey(key, code) {
+            const token = getMobileHoldKeyToken(key, code);
+            if (activeMobileHeldKeys.has(token)) {
+                return;
+            }
+
+            activeMobileHeldKeys.add(token);
+            dispatchMobileKeyToWindow(key, code, 'keydown');
+        }
+
+        function releaseMobileHoldKey(key, code) {
+            const token = getMobileHoldKeyToken(key, code);
+            if (!activeMobileHeldKeys.has(token)) {
+                return;
+            }
+
+            activeMobileHeldKeys.delete(token);
+            dispatchMobileKeyToWindow(key, code, 'keyup');
+        }
+
+        function releaseAllMobileHeldKeys() {
+            const heldTokens = Array.from(activeMobileHeldKeys);
+            for (const token of heldTokens) {
+                const tokenSplitIndex = token.indexOf('::');
+                const key = tokenSplitIndex >= 0 ? token.slice(0, tokenSplitIndex) : token;
+                const code = tokenSplitIndex >= 0 ? token.slice(tokenSplitIndex + 2) : '';
+                releaseMobileHoldKey(key, code || undefined);
+            }
+        }
+
+        function setupMobileTouchControls() {
+            const mobileControls = document.getElementById('mobile-controls');
+            if (!mobileControls) {
+                return;
+            }
+
+            const tapButtons = mobileControls.querySelectorAll('[data-mobile-key]');
+            tapButtons.forEach((button) => {
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    if (document.body.classList.contains('mobile-portrait')) {
+                        return;
+                    }
+
+                    const key = button.getAttribute('data-mobile-key');
+                    const code = button.getAttribute('data-mobile-code');
+                    triggerMobileTapKey(key, code || undefined);
+                });
+            });
+
+            const holdButtons = mobileControls.querySelectorAll('[data-mobile-hold-key]');
+            holdButtons.forEach((button) => {
+                const key = button.getAttribute('data-mobile-hold-key');
+                const code = button.getAttribute('data-mobile-hold-code');
+
+                button.addEventListener('pointerdown', (event) => {
+                    event.preventDefault();
+                    if (document.body.classList.contains('mobile-portrait')) {
+                        return;
+                    }
+
+                    pressMobileHoldKey(key, code || undefined);
+                });
+
+                const releaseHandler = (event) => {
+                    event.preventDefault();
+                    releaseMobileHoldKey(key, code || undefined);
+                };
+
+                button.addEventListener('pointerup', releaseHandler);
+                button.addEventListener('pointercancel', releaseHandler);
+                button.addEventListener('pointerleave', releaseHandler);
+            });
+
+            const orientationLockButton = document.getElementById('mobile-orientation-lock');
+            if (orientationLockButton) {
+                orientationLockButton.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    await requestMobileLandscapeLock();
+                });
+            }
+
+            const firstInteractionHandler = async () => {
+                await requestMobileLandscapeLock();
+            };
+            window.addEventListener('pointerdown', firstInteractionHandler, { once: true, passive: true });
+
+            window.addEventListener('blur', () => {
+                releaseAllMobileHeldKeys();
+            });
+        }
+
+        function setupMobileExperience() {
+            if (mobileExperienceReady || !isMobileDeviceExperience()) {
+                return;
+            }
+
+            mobileExperienceReady = true;
+            document.body.classList.add('mobile-device');
+
+            updateMobileOrientationState();
+            setupMobileTouchControls();
+
+            window.addEventListener('resize', updateMobileOrientationState);
+            window.addEventListener('orientationchange', async () => {
+                updateMobileOrientationState();
+                await requestMobileLandscapeLock();
+            });
+
+            requestMobileLandscapeLock();
+        }
+
         function initializeInteriorCameraPresetFromModel() {
             if (interiorCameraPresetInitialized || !model) {
                 return;
@@ -1919,6 +2105,61 @@
             return transitionCameraTo(interiorCameraPosition, interiorCameraTarget, animate);
         }
 
+        function applyInteriorCameraDragLimits() {
+            if (!controls) {
+                return false;
+            }
+
+            if (!controlsOrbitStateBeforeInterior) {
+                controlsOrbitStateBeforeInterior = {
+                    minAzimuthAngle: controls.minAzimuthAngle,
+                    maxAzimuthAngle: controls.maxAzimuthAngle,
+                    minPolarAngle: controls.minPolarAngle,
+                    maxPolarAngle: controls.maxPolarAngle,
+                    minDistance: controls.minDistance,
+                    maxDistance: controls.maxDistance,
+                    rotateSpeed: controls.rotateSpeed
+                };
+            }
+
+            interiorOrbitBaseOffset.copy(interiorCameraPosition).sub(interiorCameraTarget);
+            if (interiorOrbitBaseOffset.lengthSq() < 0.000001) {
+                interiorOrbitBaseOffset.set(0, 0, -1);
+            }
+
+            interiorOrbitSpherical.setFromVector3(interiorOrbitBaseOffset);
+            const orbitRadius = Math.max(0.01, interiorOrbitSpherical.radius);
+            const minPhi = 0.08;
+            const maxPhi = Math.PI - 0.08;
+
+            controls.minAzimuthAngle = interiorOrbitSpherical.theta - interiorOrbitAzimuthLimit;
+            controls.maxAzimuthAngle = interiorOrbitSpherical.theta + interiorOrbitAzimuthLimit;
+            controls.minPolarAngle = THREE.MathUtils.clamp(interiorOrbitSpherical.phi - interiorOrbitPolarLimit, minPhi, maxPhi);
+            controls.maxPolarAngle = THREE.MathUtils.clamp(interiorOrbitSpherical.phi + interiorOrbitPolarLimit, minPhi, maxPhi);
+            controls.minDistance = orbitRadius * (1 - interiorOrbitDistanceTolerance);
+            controls.maxDistance = orbitRadius * (1 + interiorOrbitDistanceTolerance);
+            controls.rotateSpeed = 0.38;
+            controls.update();
+            return true;
+        }
+
+        function clearInteriorCameraDragLimits() {
+            if (!controls || !controlsOrbitStateBeforeInterior) {
+                return false;
+            }
+
+            controls.minAzimuthAngle = controlsOrbitStateBeforeInterior.minAzimuthAngle;
+            controls.maxAzimuthAngle = controlsOrbitStateBeforeInterior.maxAzimuthAngle;
+            controls.minPolarAngle = controlsOrbitStateBeforeInterior.minPolarAngle;
+            controls.maxPolarAngle = controlsOrbitStateBeforeInterior.maxPolarAngle;
+            controls.minDistance = controlsOrbitStateBeforeInterior.minDistance;
+            controls.maxDistance = controlsOrbitStateBeforeInterior.maxDistance;
+            controls.rotateSpeed = controlsOrbitStateBeforeInterior.rotateSpeed;
+            controlsOrbitStateBeforeInterior = null;
+            controls.update();
+            return true;
+        }
+
         function enterInteriorCameraMode(animate = true) {
             if (!camera || !controls) {
                 return false;
@@ -1948,6 +2189,7 @@
             }
 
             interiorCameraActive = true;
+            applyInteriorCameraDragLimits();
             setActiveSectionPivotAxisValues(
                 interiorAxisOffset.x,
                 interiorAxisOffset.y,
@@ -1963,6 +2205,7 @@
             }
 
             interiorCameraActive = false;
+            clearInteriorCameraDragLimits();
 
             if (interiorReturnSnapshotReady && interiorDoorTargetsBeforeEntry.length === doorRigs.length) {
                 for (let index = 0; index < doorRigs.length; index += 1) {

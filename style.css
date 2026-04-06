@@ -62,6 +62,115 @@ body, html {
     margin: 4px 0;
 }
 
+#mobile-rotate-overlay,
+#mobile-controls {
+    display: none;
+}
+
+#mobile-rotate-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 8, 14, 0.88);
+    backdrop-filter: blur(4px);
+    padding: 24px;
+}
+
+.mobile-rotate-card {
+    width: min(88vw, 360px);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.26);
+    background: rgba(14, 18, 30, 0.92);
+    box-shadow: 0 14px 48px rgba(0, 0, 0, 0.42);
+    color: #eef3ff;
+    font-family: monospace;
+    padding: 16px 14px;
+    text-align: center;
+}
+
+.mobile-rotate-title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+}
+
+.mobile-rotate-body {
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0.9;
+    margin-bottom: 12px;
+}
+
+#mobile-orientation-lock {
+    border: 1px solid rgba(255, 255, 255, 0.36);
+    background: rgba(255, 255, 255, 0.12);
+    color: #f4f8ff;
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+#mobile-controls {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 1800;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto;
+}
+
+.mobile-controls-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.mobile-controls-row button {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    background: rgba(8, 12, 20, 0.8);
+    color: #edf3ff;
+    font-family: monospace;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    padding: 10px 8px;
+    touch-action: manipulation;
+    user-select: none;
+}
+
+.mobile-controls-row button:active {
+    transform: scale(0.98);
+    background: rgba(22, 30, 46, 0.88);
+}
+
+.mobile-steer-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.mobile-device #mobile-controls {
+    display: flex;
+}
+
+body.mobile-device.mobile-portrait #mobile-rotate-overlay {
+    display: flex;
+}
+
+body.mobile-device.mobile-portrait #mobile-controls {
+    opacity: 0.34;
+    pointer-events: none;
+}
+
+body.mobile-device #controls-tooltip {
+    display: none;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .section h1 {
@@ -71,5 +180,11 @@ body, html {
     #debug-info {
         font-size: 0.8rem;
         padding: 8px;
+    }
+
+    #mobile-controls {
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
     }
 }

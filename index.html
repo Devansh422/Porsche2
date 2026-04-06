@@ -52,6 +52,33 @@
         <div>- Enter to sit inside, Esc to reset</div>
     </div>
 
+    <div id="mobile-rotate-overlay" aria-live="polite">
+        <div class="mobile-rotate-card">
+            <div class="mobile-rotate-title">Rotate To Landscape</div>
+            <div class="mobile-rotate-body">This experience is optimized for landscape mode on mobile.</div>
+            <button id="mobile-orientation-lock" type="button">Enable Landscape</button>
+        </div>
+    </div>
+
+    <div id="mobile-controls" aria-label="Mobile driving controls">
+        <div class="mobile-controls-row">
+            <button type="button" data-mobile-key="s">Engine</button>
+            <button type="button" data-mobile-key=" " data-mobile-code="Space">Rev</button>
+            <button type="button" data-mobile-key="Enter">Enter</button>
+            <button type="button" data-mobile-key="Escape">Esc</button>
+        </div>
+        <div class="mobile-controls-row">
+            <button type="button" data-mobile-key="k">Door L</button>
+            <button type="button" data-mobile-key="j">Doors</button>
+            <button type="button" data-mobile-key="l">Door R</button>
+            <button type="button" data-mobile-key="0">Close</button>
+        </div>
+        <div class="mobile-controls-row mobile-steer-row">
+            <button type="button" id="mobile-steer-left" data-mobile-hold-key="ArrowLeft" data-mobile-hold-code="ArrowLeft">Steer Left</button>
+            <button type="button" id="mobile-steer-right" data-mobile-hold-key="ArrowRight" data-mobile-hold-code="ArrowRight">Steer Right</button>
+        </div>
+    </div>
+
     <div id="author-credit" style="position: fixed; right: 14px; bottom: 14px; z-index: 1150; padding: 6px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.72); border: 1px solid rgba(255, 255, 255, 0.28); color: #f4f8ff; font-family: monospace; font-size: 12px; letter-spacing: 0.03em; pointer-events: none; user-select: none;">Devansh Verma</div>
 
     <!-- CDN Scripts as per user specification -->
