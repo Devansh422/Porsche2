@@ -2252,21 +2252,35 @@ const scrollContainer = document.getElementById('scroll-container');
                 };
             }
 
-            const splitTextPlugin = (typeof window !== 'undefined' && typeof window.SplitText === 'function')
-                ? window.SplitText
+            const splitTypeConstructor = (typeof window !== 'undefined' && typeof window.SplitType === 'function')
+                ? window.SplitType
                 : null;
 
-            if (splitTextPlugin) {
+            if (splitTypeConstructor) {
                 try {
-                    if (!gsap.plugins.SplitText) {
-                        gsap.registerPlugin(splitTextPlugin);
-                    }
+                    const splitInstance = new splitTypeConstructor(element, {
+                        types: type === 'words' ? 'words' : 'chars'
+                    });
 
-                    const splitInstance = new splitTextPlugin(element, { type });
-                    activeSplitTextInstances.push(splitInstance);
-                    return splitInstance;
+                    const normalizedSplit = {
+                        chars: Array.isArray(splitInstance.chars) ? splitInstance.chars : [],
+                        words: Array.isArray(splitInstance.words) ? splitInstance.words : [],
+                        revert: () => {
+                            if (typeof splitInstance.revert === 'function') {
+                                splitInstance.revert();
+                                return;
+                            }
+
+                            if (typeof splitTypeConstructor.revert === 'function') {
+                                splitTypeConstructor.revert(element);
+                            }
+                        }
+                    };
+
+                    activeSplitTextInstances.push(normalizedSplit);
+                    return normalizedSplit;
                 } catch (error) {
-                    // Fallback to manual splitting if plugin init fails.
+                    // Fallback to manual splitting if SplitType init fails.
                 }
             }
 
