@@ -1,4 +1,4 @@
-﻿const scrollContainer = document.getElementById('scroll-container');
+const scrollContainer = document.getElementById('scroll-container');
                 const sectionsRoot = document.getElementById('sections');
                 const sections = Array.from(document.querySelectorAll('.section'));
 
@@ -134,6 +134,7 @@
         const defaultPivotOffset = new THREE.Vector3(0, 0, 0);
         const pivotOffset = defaultPivotOffset.clone();
         const pivotWorldPosition = new THREE.Vector3();
+        const introCameraAimOffset = new THREE.Vector3(0, 0.6, 0);
         const dragRaycaster = new THREE.Raycaster();
         const dragPointer = new THREE.Vector2();
         const dragPlane = new THREE.Plane();
@@ -169,6 +170,16 @@
         let camInNudgeControlsReady = false;
         let axisQuickControlsReady = false;
         let axisManualControlsReady = false;
+        let introDomBuilt = false;
+        let introActive = false;
+        let introSequenceHasStarted = false;
+        let introTimeline = null;
+        let cinematicTextTimeline = null;
+        const activeSplitTextInstances = [];
+        let introMusicNode = null;
+        let introAudioPreloadPromise = null;
+        let cameraDebugStudioReady = false;
+        let introCameraOverrideActive = false;
         const fixedShadowSettings = {
             opacity: 0.18,
             intensity: 0.18,
@@ -213,6 +224,9 @@
             'object_51',
             'object_42'
         ];
+        const bloomGlowTargetMeshName = 'object_318';
+        const bloomGlowEmissiveColor = 0xFFFFFF;
+        const bloomGlowEmissiveIntensity = 100.0;
         const hardcodedWheelAxisPoints = [
             new THREE.Vector3(-9.02, 1.40, -13.98),
             new THREE.Vector3(-15.65, 1.40, -14.01),
@@ -231,6 +245,8 @@
         let engineRunning = false;
         let engineAudioContext = null;
         let engineMasterGainNode = null;
+        let introLightReverbConvolverNode = null;
+        let introLightReverbWetGainNode = null;
         let engineStartBuffer = null;
         let engineLoopBuffer = null;
         let engineRevBuffer = null;
@@ -238,7 +254,16 @@
         let engineLoopSourceNode = null;
         let engineRevSourceNode = null;
         let engineStopTailSourceNode = null;
+        let engineRevCurrentNormalized = 0;
+        let engineRevTargetNormalized = 0;
+        let engineRevHoldActive = false;
+        let engineRevHoldStrengthNormalized = 0;
+        let engineRevPulseStrengthNormalized = 0;
+        let engineRevPulseActiveUntilMs = 0;
         let engineAudioLoadingPromise = null;
+        let engineAudioPreloadPromise = null;
+        let engineAudioPreloadedBuffers = null;
+        let engineAudioWarmupStarted = false;
         let doorAudioReady = false;
         let doorOpenAudioElement = null;
         let doorCloseAudioElement = null;
@@ -251,14 +276,324 @@
         const engineRevAudioPath = 'assets/rev.mp3';
         const doorOpenAudioPath = 'assets/open.mp3';
         const doorCloseAudioPath = 'assets/close.mp3';
+        const lightTurnOnAudioPath = 'assets/light.mp3';
         const porscheModelPath = 'assets/porsche.glb';
-        const preloaderAudioAssetPaths = [
-            engineStartAudioPath,
-            engineLoopAudioPath,
-            engineRevAudioPath,
-            doorOpenAudioPath,
-            doorCloseAudioPath
+        const engineAudioCacheStoreName = 'porsche-engine-audio-v1';
+        const introShotPresets = {
+            wide: { pos: [15.0, 5.0, -45.0], aim: [0.12, 0.6, 0.0] },
+            lowWheel: { pos: [10.0, -2.71, 45.0], aim: [0.25, -0.55, 0.0] },
+            rearWing: { pos: [14.4, 10.0, 150.0], aim: [0.25, 0.9, 0.0] },
+            sidePull: { pos: [13.46, 1.02, 90.0], aim: [0.07, 0.89, 0.0] },
+            heroShot: { pos: [13.0, 0.58, -60.0], aim: [-4.0, 0.17, 0.0] }
+        };
+        const introCameraBeatMarkers = [
+            { label: '0.0 wide', time: 0 },
+            { label: '2.0 wide move', time: 2 },
+            { label: '3.5 lowWheel', time: 3.5 },
+            { label: '5.8 rearWing', time: 5.8 },
+            { label: '8.0 sidePull', time: 8.0 },
+            { label: '11.0 interior', time: 11.0 },
+            { label: '13.2 resetIn', time: 13.2 },
+            { label: '13.2 hero', time: 13.2 },
+            { label: '14.4 heroHold', time: 14.4 }
         ];
+        const introAudioAssetPaths = {
+            cinematicDrone: engineLoopAudioPath,
+            doorOpen: doorOpenAudioPath,
+            doorClose: doorCloseAudioPath,
+            doorClunk: doorCloseAudioPath,
+            steeringCreak: doorOpenAudioPath,
+            heroRev: engineRevAudioPath,
+            lightTurnOn: lightTurnOnAudioPath
+        };
+        const introAudioBuffers = {};
+        const introLightTurnOnAudioVolume = 0.62;
+        const introLightReverbDryMix = 0.76;
+        const introLightReverbWetMix = 0.42;
+        const introLightReverbDurationSeconds = 1.25;
+        const introLightReverbDecay = 2.1;
+        const introLightRevealStepDuration = 0.5;
+        const introEnvironmentLightTargets = [];
+        const introNeonLightTargets = [];
+        const introEnvironmentEmissiveTargets = [];
+        const introNeonEmissiveTargets = [];
+        const introEnvironmentSelfLitTargets = [];
+        const introNeonSelfLitTargets = [];
+        const introGarageReflectionTargets = [];
+        const introGarageSurfaceTargets = [];
+        const garagePrimaryLightMaterialName = 'glass';
+        const garagePrimaryLightNodeName = 'object_3';
+        const garagePrimaryLightMeshName = 'object_1';
+        const garagePrimaryLightEmissiveColor = [0.428, 0.89, 1.0];
+        const garagePrimaryLightEmissiveStrength = 10;
+        const garageSurfaceOffColor = [0.01, 0.01, 0.01];
+        const garageGlowMaterialPattern = /(light|lamp|neon|tube|strip|emissive|glow)/i;
+        let introLightRevealTimeline = null;
+        let introLightRevealCompleted = false;
+        let neonFlickerEnabled = false;
+
+        async function clearEngineAudioPersistentCache() {
+            if (typeof window === 'undefined' || !('caches' in window)) {
+                return;
+            }
+
+            try {
+                await window.caches.delete(engineAudioCacheStoreName);
+            } catch (error) {
+                // Ignore Cache API deletion failures.
+            }
+        }
+
+        async function fetchEngineAudioArrayBuffers(fetchOptions = undefined) {
+            const canUsePersistentCache = (
+                typeof window !== 'undefined'
+                && 'caches' in window
+                && (!fetchOptions || fetchOptions.cache !== 'no-store')
+            );
+
+            let audioCacheStore = null;
+            if (canUsePersistentCache) {
+                try {
+                    audioCacheStore = await window.caches.open(engineAudioCacheStoreName);
+                } catch (error) {
+                    audioCacheStore = null;
+                }
+            }
+
+            const loadResponse = async (audioPath) => {
+                if (audioCacheStore) {
+                    try {
+                        const cachedResponse = await audioCacheStore.match(audioPath);
+                        if (cachedResponse && cachedResponse.ok) {
+                            return cachedResponse;
+                        }
+                    } catch (error) {
+                        // Ignore Cache API lookup failures and fall back to network.
+                    }
+                }
+
+                const networkResponse = await fetch(audioPath, fetchOptions);
+                if (networkResponse.ok && audioCacheStore) {
+                    try {
+                        await audioCacheStore.put(audioPath, networkResponse.clone());
+                    } catch (error) {
+                        // Ignore Cache API write failures.
+                    }
+                }
+
+                return networkResponse;
+            };
+
+            const [startResponse, loopResponse, revResponse] = await Promise.all([
+                loadResponse(engineStartAudioPath),
+                loadResponse(engineLoopAudioPath),
+                loadResponse(engineRevAudioPath)
+            ]);
+
+            if (!startResponse.ok || !loopResponse.ok || !revResponse.ok) {
+                throw new Error('One or more engine audio files failed to load.');
+            }
+
+            const [startArrayBuffer, loopArrayBuffer, revArrayBuffer] = await Promise.all([
+                startResponse.arrayBuffer(),
+                loopResponse.arrayBuffer(),
+                revResponse.arrayBuffer()
+            ]);
+
+            return {
+                startArrayBuffer,
+                loopArrayBuffer,
+                revArrayBuffer
+            };
+        }
+
+        function getOrCreateSharedAudioContext() {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) {
+                return null;
+            }
+
+            if (!engineAudioContext) {
+                engineAudioContext = new AudioContextClass();
+            }
+
+            if (!engineMasterGainNode) {
+                engineMasterGainNode = engineAudioContext.createGain();
+                engineMasterGainNode.gain.value = 1;
+                engineMasterGainNode.connect(engineAudioContext.destination);
+            }
+
+            return engineAudioContext;
+        }
+
+        function createIntroLightReverbImpulse(audioContext, durationSeconds = introLightReverbDurationSeconds, decay = introLightReverbDecay) {
+            const sampleRate = audioContext.sampleRate || 44100;
+            const sampleLength = Math.max(1, Math.floor(sampleRate * durationSeconds));
+            const impulse = audioContext.createBuffer(2, sampleLength, sampleRate);
+
+            for (let channelIndex = 0; channelIndex < impulse.numberOfChannels; channelIndex += 1) {
+                const channelData = impulse.getChannelData(channelIndex);
+                for (let sampleIndex = 0; sampleIndex < sampleLength; sampleIndex += 1) {
+                    const envelope = Math.pow(1 - (sampleIndex / sampleLength), decay);
+                    channelData[sampleIndex] = (Math.random() * 2 - 1) * envelope;
+                }
+            }
+
+            return impulse;
+        }
+
+        function ensureIntroLightReverb(audioContext) {
+            if (!audioContext) {
+                return false;
+            }
+
+            if (introLightReverbConvolverNode && introLightReverbWetGainNode) {
+                return true;
+            }
+
+            try {
+                introLightReverbConvolverNode = audioContext.createConvolver();
+                introLightReverbConvolverNode.buffer = createIntroLightReverbImpulse(audioContext);
+
+                introLightReverbWetGainNode = audioContext.createGain();
+                introLightReverbWetGainNode.gain.value = introLightReverbWetMix;
+
+                introLightReverbConvolverNode.connect(introLightReverbWetGainNode);
+                introLightReverbWetGainNode.connect(engineMasterGainNode || audioContext.destination);
+                return true;
+            } catch (error) {
+                introLightReverbConvolverNode = null;
+                introLightReverbWetGainNode = null;
+                return false;
+            }
+        }
+
+        async function preloadIntroAudio() {
+            if (introAudioPreloadPromise) {
+                return introAudioPreloadPromise;
+            }
+
+            introAudioPreloadPromise = (async () => {
+                const audioContext = getOrCreateSharedAudioContext();
+                if (!audioContext) {
+                    return false;
+                }
+
+                const entries = Object.entries(introAudioAssetPaths);
+                await Promise.all(entries.map(async ([key, url]) => {
+                    if (introAudioBuffers[key]) {
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(url, { cache: 'force-cache' });
+                        if (!response.ok) {
+                            throw new Error(`Failed to load ${url}`);
+                        }
+
+                        const arrayBuffer = await response.arrayBuffer();
+                        const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+                        introAudioBuffers[key] = decodedBuffer;
+                    } catch (error) {
+                        console.warn(`[Intro Audio] Failed to preload ${key} from ${url}`, error);
+                    }
+                }));
+
+                return true;
+            })();
+
+            try {
+                return await introAudioPreloadPromise;
+            } finally {
+                introAudioPreloadPromise = null;
+            }
+        }
+
+        function playPreloadedIntroAudio(key, volume = 1, loop = false) {
+            const buffer = introAudioBuffers[key];
+            const audioContext = getOrCreateSharedAudioContext();
+            if (!buffer || !audioContext) {
+                return null;
+            }
+
+            if (audioContext.state === 'suspended') {
+                void audioContext.resume().catch(() => {
+                    // Ignore resume failures and allow user gesture to resume later.
+                });
+            }
+
+            const sourceNode = audioContext.createBufferSource();
+            const gainNode = audioContext.createGain();
+            sourceNode.buffer = buffer;
+            sourceNode.loop = loop;
+            gainNode.gain.value = volume;
+            sourceNode.connect(gainNode);
+            gainNode.connect(engineMasterGainNode || audioContext.destination);
+            sourceNode.start();
+            return {
+                source: sourceNode,
+                gain: gainNode
+            };
+        }
+
+        function playIntroLightTurnOnSound(volume = introLightTurnOnAudioVolume) {
+            const buffer = introAudioBuffers.lightTurnOn;
+            const audioContext = getOrCreateSharedAudioContext();
+            if (!buffer || !audioContext) {
+                return null;
+            }
+
+            if (audioContext.state === 'suspended') {
+                void audioContext.resume().catch(() => {
+                    // Ignore resume failures and allow user gesture to resume later.
+                });
+            }
+
+            const sourceNode = audioContext.createBufferSource();
+            sourceNode.buffer = buffer;
+            sourceNode.loop = false;
+
+            const dryGainNode = audioContext.createGain();
+            dryGainNode.gain.value = volume * introLightReverbDryMix;
+            sourceNode.connect(dryGainNode);
+            dryGainNode.connect(engineMasterGainNode || audioContext.destination);
+
+            let reverbSendGainNode = null;
+            if (ensureIntroLightReverb(audioContext) && introLightReverbConvolverNode) {
+                reverbSendGainNode = audioContext.createGain();
+                reverbSendGainNode.gain.value = volume;
+                sourceNode.connect(reverbSendGainNode);
+                reverbSendGainNode.connect(introLightReverbConvolverNode);
+            }
+
+            sourceNode.onended = () => {
+                try {
+                    sourceNode.disconnect();
+                } catch (error) {
+                    // Ignore cleanup errors.
+                }
+                try {
+                    dryGainNode.disconnect();
+                } catch (error) {
+                    // Ignore cleanup errors.
+                }
+                if (reverbSendGainNode) {
+                    try {
+                        reverbSendGainNode.disconnect();
+                    } catch (error) {
+                        // Ignore cleanup errors.
+                    }
+                }
+            };
+
+            sourceNode.start();
+            return {
+                source: sourceNode,
+                dryGain: dryGainNode,
+                reverbSend: reverbSendGainNode
+            };
+        }
+
         const engineStartAudioVolume = 0.95;
         const engineLoopAudioVolume = 0.72;
         const doorOpenAudioVolume = 0.75;
@@ -268,8 +603,17 @@
         const engineRevAudioVolumeWhileRunning = 0.46;
         const engineRevPlaybackRateMin = 0.92;
         const engineRevPlaybackRateMax = 1.28;
-        const engineLoopTrimStart = 0.03;
-        const engineLoopTrimEnd = 0.03;
+        const engineLoopPlaybackRateIdle = 0.85;
+        const engineLoopPlaybackRateMax = 2.65;
+        const engineRevRiseTimeConstant = 0.032;
+        const engineRevFallTimeConstant = 0.08;
+        const engineRevPulseHoldMs = 180;
+        const engineRevPulseStrengthMin = 0.76;
+        const engineRevPulseStrengthRange = 0.2;
+        const engineRevHoldStrengthMin = 0.93;
+        const engineRevHoldStrengthRange = 0.07;
+        const engineLoopTrimStart = 0.01;
+        const engineLoopTrimEnd = 0.01;
         const engineStartToLoopOverlapSeconds = 0.015;
         const engineStopTailDurationSeconds = 0.52;
         const engineStopTailVolume = 0.5;
@@ -280,11 +624,14 @@
         const engineStartRequiredPopupCooldownMs = 900;
         const engineStartRequiredPopupDurationMs = 1250;
         const engineStartRequiredMessage = 'Press "S" to start the engine.';
+        const engineAudioLoadingMessage = 'Engine audio is loading... Press "S" again in a moment.';
         const doorOpenAngle = THREE.MathUtils.degToRad(58);
         const doorAnimationDuration = 0.22;
         const doorSnapEpsilon = THREE.MathUtils.degToRad(0.08);
         const doorEnterTooltipShowThreshold = 0.08;
-        const interiorCameraTransitionDuration = 0.62;
+        const cinematicCameraTransitionDuration = 2;
+        const cinematicCameraEase = createCubicBezierEase(0.22, 1, 0.36, 1);
+        const interiorCameraTransitionDuration = cinematicCameraTransitionDuration;
         let doorOpenDirectionMultiplier = 1;
         const caliperDebugStatus = [];
         let steeringControlsReady = false;
@@ -348,9 +695,9 @@
         const defaultRimLightIntensity = 0.1;
         const defaultFogColor = [0.008, 0.008, 0.04];
         const defaultFogDensity = 0.05;
-        const defaultBloomStrength = 0.24;
-        const defaultBloomThreshold = 0.5;
-        const defaultBloomRadius = 0.5;
+        const defaultBloomStrength = 1.5;
+        const defaultBloomThreshold = 0.85;
+        const defaultBloomRadius = 0.4;
         const modelMaterialStates = [];
         let lastAppliedEnvironmentIntensityScale = defaultEnvironmentIntensityScale;
         let lastAppliedMinimumRoughness = defaultMinimumRoughness;
@@ -373,19 +720,12 @@
         setupControlsToggleButton();
         setupMobileExperience();
         initThreeJS();
-        updateCaliperDebugInfo();
         animate();
 
         function initThreeJS() {
             // Scene
             scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(0x02020a, defaultFogDensity);
-
-            pivotHelper = new THREE.AxesHelper(2);
-            pivotHelper.setColors(0xd8dde6, 0xd8dde6, 0xd8dde6);
-            pivotHelper.material.transparent = true;
-            pivotHelper.material.opacity = 0.7;
-            scene.add(pivotHelper);
 
             // Camera
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -397,7 +737,7 @@
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 0.84;
-            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.shadowMap.autoUpdate = false;
@@ -507,6 +847,53 @@
                 preloaderStatusText.textContent = message;
             };
 
+            const preloadEngineAudioInBackground = async () => {
+                if (engineAudioReady || engineAudioPreloadedBuffers) {
+                    return true;
+                }
+
+                if (engineAudioPreloadPromise) {
+                    await engineAudioPreloadPromise;
+                    return Boolean(engineAudioPreloadedBuffers);
+                }
+
+                engineAudioPreloadPromise = (async () => {
+                    engineAudioPreloadedBuffers = await fetchEngineAudioArrayBuffers({ cache: 'force-cache' });
+                })();
+
+                try {
+                    await engineAudioPreloadPromise;
+                    return Boolean(engineAudioPreloadedBuffers);
+                } catch (error) {
+                    engineAudioPreloadedBuffers = null;
+                    console.warn('Engine audio background preload failed:', error);
+                    return false;
+                } finally {
+                    engineAudioPreloadPromise = null;
+                }
+            };
+
+            const scheduleEngineAudioWarmup = () => {
+                if (engineAudioWarmupStarted || engineAudioReady) {
+                    return;
+                }
+
+                engineAudioWarmupStarted = true;
+
+                const runWarmup = () => {
+                    void (async () => {
+                        try {
+                            await preloadEngineAudioInBackground();
+                            await ensureEngineAudioInitialized();
+                        } catch (error) {
+                            console.warn('Engine audio warmup failed:', error);
+                        }
+                    })();
+                };
+
+                runWarmup();
+            };
+
             const closePreloaderIfReady = () => {
                 if (preloaderDismissed || preloaderHasError) {
                     return;
@@ -517,6 +904,8 @@
                 }
 
                 setPreloaderProgress(1, 'Scene ready');
+                scheduleEngineAudioWarmup();
+                void preloadIntroAudio();
                 preloaderDismissed = true;
                 window.setTimeout(() => {
                     preloaderOverlay.style.opacity = '0';
@@ -525,6 +914,8 @@
                         if (preloaderOverlay.parentNode) {
                             preloaderOverlay.parentNode.removeChild(preloaderOverlay);
                         }
+
+                        buildIntroDOM(true);
                     }, 280);
                 }, 100);
             };
@@ -550,18 +941,9 @@
             const loader = new GLTFLoader(loadingManager);
             const hdrLoader = new RGBELoader(loadingManager);
 
-            const audioPreloadLoader = new THREE.FileLoader(loadingManager);
-            audioPreloadLoader.setResponseType('arraybuffer');
-            for (const audioPath of preloaderAudioAssetPaths) {
-                audioPreloadLoader.load(
-                    audioPath,
-                    () => {},
-                    undefined,
-                    () => {
-                        showPreloaderError(`Failed to load: ${audioPath}`);
-                    }
-                );
-            }
+            // Keep startup preloader focused on core scene files only.
+            // Engine audio warms in background after scene ready; door audio stays lazy.
+            scheduleEngineAudioWarmup();
 
             setPreloaderProgress(0.02, 'Preparing scene assets');
 
@@ -593,6 +975,65 @@
                         if (node.isMesh) {
                             node.castShadow = false;
                             node.receiveShadow = true;
+
+                            const materials = Array.isArray(node.material)
+                                ? node.material
+                                : [node.material];
+
+                            materials.forEach((material) => {
+                                if (!material) {
+                                    return;
+                                }
+
+                                registerGarageSurfaceMaterial(material);
+                                registerGarageReflectionMaterial(material);
+
+                                const nodeName = typeof node.name === 'string' ? node.name : '';
+                                const materialName = typeof material.name === 'string' ? material.name : '';
+                                const materialNameLower = materialName.toLowerCase();
+                                const isGarageGlassMaterial = materialNameLower === garagePrimaryLightMaterialName
+                                    || materialNameLower.includes(garagePrimaryLightMaterialName);
+                                const likelySelfLitFixture = Boolean(material.isMeshBasicMaterial)
+                                    || garageGlowMaterialPattern.test(nodeName)
+                                    || garageGlowMaterialPattern.test(materialName)
+                                    || isGarageGlassMaterial;
+
+                                if (likelySelfLitFixture) {
+                                    registerIntroSelfLitMaterial(material, 'environment');
+                                }
+
+                                if (!material.emissive) {
+                                    return;
+                                }
+
+                                const hasEmissiveColor = (material.emissive.r + material.emissive.g + material.emissive.b) > 0.0001;
+                                const extensionStrength = Number(
+                                    material
+                                    && material.userData
+                                    && material.userData.gltfExtensions
+                                    && material.userData.gltfExtensions.KHR_materials_emissive_strength
+                                    && material.userData.gltfExtensions.KHR_materials_emissive_strength.emissiveStrength
+                                );
+                                const baseEmissiveIntensity = Number.isFinite(material.emissiveIntensity)
+                                    ? material.emissiveIntensity
+                                    : (Number.isFinite(extensionStrength)
+                                        ? extensionStrength
+                                        : (hasEmissiveColor ? 1 : 0));
+
+                                const forcedGarageIntensity = isGarageGlassMaterial
+                                    ? (Number.isFinite(extensionStrength) ? extensionStrength : 10)
+                                    : 0;
+                                const targetIntensity = Math.max(baseEmissiveIntensity, forcedGarageIntensity);
+
+                                if ((targetIntensity > 0 && hasEmissiveColor) || isGarageGlassMaterial) {
+                                    registerIntroEmissiveMaterial(material, targetIntensity, 'environment');
+                                }
+                            });
+                        }
+
+                        if (node.isLight) {
+                            const baseIntensity = Number.isFinite(node.intensity) ? node.intensity : 1;
+                            registerIntroLight(node, baseIntensity, 'environment');
                         }
                     });
 
@@ -601,7 +1042,6 @@
                     garageReady = true;
                     setPreloaderProgress(0.94, 'Garage ready');
                     closePreloaderIfReady();
-                    console.log('Garage GLB model loaded successfully!');
                 },
                 undefined,
                 function (error) {
@@ -627,6 +1067,8 @@
                             node.receiveShadow = true;
                         }
                     });
+
+                    applyObject51BloomGlow(model);
 
                     cacheModelMaterialStates(model);
 
@@ -693,7 +1135,6 @@
                     applyPivotOffsetFromKeyframe(0);
                     applyLightFromKeyframe(0);
                     initializeInteriorCameraPresetFromModel();
-                    updateKeyframeEditorInputs();
 
                     // Add orbit controls for cursor interaction (but disable scrolling interference)
                     controls = new OrbitControls(camera, renderer.domElement);
@@ -710,9 +1151,6 @@
 
                     modelPivot.getWorldPosition(pivotWorldPosition);
                     controls.target.copy(pivotWorldPosition);
-                    if (pivotHelper) {
-                        pivotHelper.position.copy(pivotWorldPosition);
-                    }
                     controls.update();
 
                     renderer.domElement.addEventListener('pointerdown', () => {
@@ -725,7 +1163,6 @@
                         renderer.domElement.style.cursor = 'grab';
                     });
 
-                    setupKeyframeEditorControls();
                     setupWheelControls();
                     setupDoorControls();
                     setupDoorEnterTooltipOverlay();
@@ -733,9 +1170,7 @@
                     setupModelDragControls();
                     setupModelScrollAnimations(sections, modelRig, modelPivot);
                     setupCyberpunkNeonRig(modelRig);
-                    setupNeonDebuggerControls();
                     setupCarDetailHotspots(model);
-                    setupDetailHotspotDebuggerControls();
                     applyHardcodedManualDoorPivotWorldPoints();
                     alignGarageToCar();
                     requestShadowUpdate();
@@ -744,7 +1179,6 @@
                     porscheReady = true;
                     setPreloaderProgress(0.98, 'Porsche ready');
                     closePreloaderIfReady();
-                    console.log('Porsche GLB model loaded successfully!');
                 },
                 undefined,
                 function (error) {
@@ -756,6 +1190,7 @@
             // Add ambient light
             ambientLight = new THREE.AmbientLight(0x0a0a2a, defaultAmbientLightIntensity);
             scene.add(ambientLight);
+            registerIntroLight(ambientLight, defaultAmbientLightIntensity);
 
             fillLight = new THREE.HemisphereLight(0xffffff, 0xffffff, defaultFillLightIntensity);
             fillLight.color.setRGB(
@@ -769,6 +1204,7 @@
                 defaultFillGroundColor[2]
             );
             scene.add(fillLight);
+            registerIntroLight(fillLight, defaultFillLightIntensity);
 
             // Add directional light
             keyLight = new THREE.DirectionalLight(0x444488, fixedShadowSettings.intensity);
@@ -789,6 +1225,7 @@
             keyLight.shadow.camera.top = 24;
             keyLight.shadow.camera.bottom = -24;
             scene.add(keyLight);
+            registerIntroLight(keyLight, fixedShadowSettings.intensity);
 
             rimLight = new THREE.DirectionalLight(0x102040, defaultRimLightIntensity);
             rimLight.position.set(
@@ -798,6 +1235,7 @@
             );
             rimLight.castShadow = false;
             scene.add(rimLight);
+            registerIntroLight(rimLight, defaultRimLightIntensity);
 
             // Handle window resize
             window.addEventListener('resize', () => {
@@ -825,9 +1263,14 @@
             if (controls) {
                 if (modelPivot) {
                     modelPivot.getWorldPosition(pivotWorldPosition);
-                    controls.target.copy(pivotWorldPosition);
-                    if (pivotHelper) {
-                        pivotHelper.position.copy(pivotWorldPosition);
+                    if (introCameraOverrideActive) {
+                        controls.target.set(
+                            pivotWorldPosition.x + introCameraAimOffset.x,
+                            pivotWorldPosition.y + introCameraAimOffset.y,
+                            pivotWorldPosition.z + introCameraAimOffset.z
+                        );
+                    } else {
+                        controls.target.copy(pivotWorldPosition);
                     }
                 }
 
@@ -852,6 +1295,7 @@
 
             const steeringChanged = updateSteeringAnimation(deltaTime);
             const doorChanged = updateDoorAnimation(deltaTime);
+            updateEngineRevDynamics(deltaTime);
 
             if (isTranslateDrag || isRotateDrag || wheelScrollChanged || wheelAutoChanged || steeringChanged || doorChanged) {
                 requestShadowUpdate();
@@ -874,6 +1318,2228 @@
             }
 
             renderer.shadowMap.needsUpdate = true;
+        }
+
+        function removeElementById(elementId) {
+            const element = document.getElementById(elementId);
+            if (element && element.parentNode) {
+                element.parentNode.removeChild(element);
+            }
+            return element;
+        }
+
+        function buildIntroDOM(showStartOverlay = true) {
+            if (!document.body) {
+                return;
+            }
+
+            if (!document.getElementById('letterbox-top')) {
+                const topBar = document.createElement('div');
+                topBar.id = 'letterbox-top';
+                topBar.className = 'letterbox-bar';
+                document.body.appendChild(topBar);
+            }
+
+            if (!document.getElementById('letterbox-bottom')) {
+                const bottomBar = document.createElement('div');
+                bottomBar.id = 'letterbox-bottom';
+                bottomBar.className = 'letterbox-bar';
+                document.body.appendChild(bottomBar);
+            }
+
+            if (!document.getElementById('cinematic-text')) {
+                const textContainer = document.createElement('div');
+                textContainer.id = 'cinematic-text';
+                document.body.appendChild(textContainer);
+            }
+
+            if (!document.getElementById('skip-intro')) {
+                const skipButton = document.createElement('button');
+                skipButton.id = 'skip-intro';
+                skipButton.textContent = 'Skip >';
+                skipButton.style.display = 'none';
+                skipButton.addEventListener('click', skipIntro);
+                document.body.appendChild(skipButton);
+            }
+
+            if (!document.getElementById('feature-hints')) {
+                const hints = document.createElement('div');
+                hints.id = 'feature-hints';
+                hints.innerHTML = `
+                    <div class="hint-chip">Orbit</div>
+                    <div class="hint-chip">S - Engine</div>
+                    <div class="hint-chip">J/K/L - Doors</div>
+                    <div class="hint-chip">Enter - Sit Inside</div>
+                `;
+                document.body.appendChild(hints);
+            }
+
+            const existingOverlay = document.getElementById('intro-overlay');
+            if (showStartOverlay) {
+                if (existingOverlay) {
+                    existingOverlay.remove();
+                }
+
+                introActive = true;
+                introSequenceHasStarted = false;
+
+                const overlay = document.createElement('div');
+                overlay.id = 'intro-overlay';
+                overlay.innerHTML = `
+                    <p class="intro-overlay-subtitle">Porsche 911 GT3 RS - Interactive Experience</p>
+                    <button class="intro-btn pulse" id="start-experience-btn">Start Experience</button>
+                `;
+                document.body.appendChild(overlay);
+                window.requestAnimationFrame(() => {
+                    overlay.classList.add('visible');
+                });
+
+                const startButton = document.getElementById('start-experience-btn');
+                if (startButton) {
+                    startButton.addEventListener('click', onStartExperienceClicked, { once: true });
+                }
+
+                if (controls) {
+                    controls.enabled = false;
+                }
+                lenis.stop();
+            } else if (existingOverlay) {
+                existingOverlay.remove();
+            }
+
+            introDomBuilt = true;
+        }
+
+        function orbitPosition(pivot, radiusXZ, height, angleDeg) {
+            const radians = THREE.MathUtils.degToRad(angleDeg);
+            return new THREE.Vector3(
+                pivot.x + radiusXZ * Math.cos(radians),
+                pivot.y + height,
+                pivot.z + radiusXZ * Math.sin(radians)
+            );
+        }
+
+        function createCubicBezierEase(x1, y1, x2, y2) {
+            const points = [x1, y1, x2, y2].map((value) => Number(value));
+            if (!points.every((value) => Number.isFinite(value))) {
+                return (progress) => Math.min(1, Math.max(0, progress));
+            }
+
+            const clampedX1 = Math.min(1, Math.max(0, points[0]));
+            const clampedX2 = Math.min(1, Math.max(0, points[2]));
+            const yPoint1 = points[1];
+            const yPoint2 = points[3];
+
+            const cx = 3 * clampedX1;
+            const bx = 3 * (clampedX2 - clampedX1) - cx;
+            const ax = 1 - cx - bx;
+
+            const cy = 3 * yPoint1;
+            const by = 3 * (yPoint2 - yPoint1) - cy;
+            const ay = 1 - cy - by;
+
+            const sampleCurveX = (t) => ((ax * t + bx) * t + cx) * t;
+            const sampleCurveY = (t) => ((ay * t + by) * t + cy) * t;
+            const sampleCurveDerivativeX = (t) => (3 * ax * t + 2 * bx) * t + cx;
+
+            function solveCurveX(x) {
+                let t = x;
+                for (let i = 0; i < 8; i += 1) {
+                    const slope = sampleCurveDerivativeX(t);
+                    if (Math.abs(slope) < 1e-6) {
+                        break;
+                    }
+
+                    const delta = sampleCurveX(t) - x;
+                    t -= delta / slope;
+                }
+
+                let lower = 0;
+                let upper = 1;
+                t = Math.min(1, Math.max(0, t));
+
+                for (let i = 0; i < 10; i += 1) {
+                    const delta = sampleCurveX(t) - x;
+                    if (Math.abs(delta) < 1e-6) {
+                        break;
+                    }
+
+                    if (delta > 0) {
+                        upper = t;
+                    } else {
+                        lower = t;
+                    }
+
+                    t = (lower + upper) * 0.5;
+                }
+
+                return t;
+            }
+
+            return (progress) => {
+                const clampedProgress = Math.min(1, Math.max(0, progress));
+                if (clampedProgress === 0 || clampedProgress === 1) {
+                    return clampedProgress;
+                }
+
+                return sampleCurveY(solveCurveX(clampedProgress));
+            };
+        }
+
+        function getIntroLightCollection(group = 'environment') {
+            return group === 'neon'
+                ? introNeonLightTargets
+                : introEnvironmentLightTargets;
+        }
+
+        function getIntroEmissiveCollection(group = 'environment') {
+            return group === 'neon'
+                ? introNeonEmissiveTargets
+                : introEnvironmentEmissiveTargets;
+        }
+
+        function getIntroSelfLitCollection(group = 'environment') {
+            return group === 'neon'
+                ? introNeonSelfLitTargets
+                : introEnvironmentSelfLitTargets;
+        }
+
+        function registerIntroLight(light, targetIntensity, group = 'environment') {
+            if (!light || !Number.isFinite(targetIntensity)) {
+                return false;
+            }
+
+            const safeIntensity = Math.max(0, Number(targetIntensity) || 0);
+            const lightCollection = getIntroLightCollection(group);
+            const existingEntry = lightCollection.find((entry) => entry.light === light);
+
+            if (existingEntry) {
+                existingEntry.targetIntensity = safeIntensity;
+            } else {
+                lightCollection.push({
+                    light,
+                    targetIntensity: safeIntensity
+                });
+            }
+
+            light.intensity = 0;
+            return true;
+        }
+
+        function registerIntroEmissiveMaterial(material, targetEmissiveIntensity, group = 'environment') {
+            if (
+                !material
+                || !material.emissive
+                || !Number.isFinite(targetEmissiveIntensity)
+            ) {
+                return false;
+            }
+
+            const safeIntensity = Math.max(0, Number(targetEmissiveIntensity) || 0);
+            const emissiveCollection = getIntroEmissiveCollection(group);
+            const existingEntry = emissiveCollection.find((entry) => entry.material === material);
+            const targetEmissiveColor = material.emissive.clone();
+
+            if (existingEntry) {
+                existingEntry.targetEmissiveIntensity = safeIntensity;
+                existingEntry.targetEmissiveColor.copy(targetEmissiveColor);
+            } else {
+                emissiveCollection.push({
+                    material,
+                    targetEmissiveIntensity: safeIntensity,
+                    targetEmissiveColor
+                });
+            }
+
+            material.emissive.setRGB(0, 0, 0);
+            material.emissiveIntensity = 0;
+            material.needsUpdate = true;
+            return true;
+        }
+
+        function registerIntroSelfLitMaterial(material, group = 'environment') {
+            if (!material || !material.color || !material.color.isColor) {
+                return false;
+            }
+
+            const selfLitCollection = getIntroSelfLitCollection(group);
+            const existingEntry = selfLitCollection.find((entry) => entry.material === material);
+            const targetColor = material.color.clone();
+
+            if (existingEntry) {
+                existingEntry.targetColor.copy(targetColor);
+            } else {
+                selfLitCollection.push({
+                    material,
+                    targetColor
+                });
+            }
+
+            material.color.setRGB(0, 0, 0);
+            material.needsUpdate = true;
+            return true;
+        }
+
+        function registerGarageSurfaceMaterial(material) {
+            if (!material || !material.color || !material.color.isColor) {
+                return false;
+            }
+
+            const existingEntry = introGarageSurfaceTargets.find((entry) => entry.material === material);
+            const targetColor = material.color.clone();
+            const targetEmissiveColor = (material.emissive && material.emissive.isColor)
+                ? material.emissive.clone()
+                : null;
+            const targetEmissiveIntensity = Number.isFinite(material.emissiveIntensity)
+                ? material.emissiveIntensity
+                : null;
+
+            if (existingEntry) {
+                existingEntry.targetColor.copy(targetColor);
+                existingEntry.targetEmissiveColor = targetEmissiveColor;
+                existingEntry.targetEmissiveIntensity = targetEmissiveIntensity;
+            } else {
+                introGarageSurfaceTargets.push({
+                    material,
+                    targetColor,
+                    targetEmissiveColor,
+                    targetEmissiveIntensity
+                });
+            }
+
+            material.color.setRGB(
+                garageSurfaceOffColor[0],
+                garageSurfaceOffColor[1],
+                garageSurfaceOffColor[2]
+            );
+
+            if (material.emissive && material.emissive.isColor) {
+                material.emissive.setRGB(0, 0, 0);
+            }
+
+            if (Number.isFinite(material.emissiveIntensity)) {
+                material.emissiveIntensity = 0;
+            }
+
+            material.needsUpdate = true;
+            return true;
+        }
+
+        function forceGarageSurfaceOff() {
+            introGarageSurfaceTargets.forEach(({ material }) => {
+                if (!material || !material.color || !material.color.isColor) {
+                    return;
+                }
+
+                material.color.setRGB(
+                    garageSurfaceOffColor[0],
+                    garageSurfaceOffColor[1],
+                    garageSurfaceOffColor[2]
+                );
+
+                if (material.emissive && material.emissive.isColor) {
+                    material.emissive.setRGB(0, 0, 0);
+                }
+
+                if (Number.isFinite(material.emissiveIntensity)) {
+                    material.emissiveIntensity = 0;
+                }
+
+                material.needsUpdate = true;
+            });
+        }
+
+        function restoreGarageSurfaceOn(duration = 0) {
+            introGarageSurfaceTargets.forEach(({ material, targetColor, targetEmissiveColor, targetEmissiveIntensity }) => {
+                if (!material || !material.color || !material.color.isColor) {
+                    return;
+                }
+
+                const applyImmediately = !Number.isFinite(duration) || duration <= 0 || typeof gsap === 'undefined';
+                if (applyImmediately) {
+                    material.color.copy(targetColor);
+
+                    if (material.emissive && material.emissive.isColor && targetEmissiveColor) {
+                        material.emissive.copy(targetEmissiveColor);
+                    }
+
+                    if (targetEmissiveIntensity !== null && Number.isFinite(material.emissiveIntensity)) {
+                        material.emissiveIntensity = targetEmissiveIntensity;
+                    }
+
+                    material.needsUpdate = true;
+                    return;
+                }
+
+                gsap.to(material.color, {
+                    r: targetColor.r,
+                    g: targetColor.g,
+                    b: targetColor.b,
+                    duration,
+                    ease: cinematicCameraEase,
+                    onUpdate: () => {
+                        material.needsUpdate = true;
+                    }
+                });
+
+                if (material.emissive && material.emissive.isColor && targetEmissiveColor) {
+                    gsap.to(material.emissive, {
+                        r: targetEmissiveColor.r,
+                        g: targetEmissiveColor.g,
+                        b: targetEmissiveColor.b,
+                        duration,
+                        ease: cinematicCameraEase,
+                        onUpdate: () => {
+                            material.needsUpdate = true;
+                        }
+                    });
+                }
+
+                if (targetEmissiveIntensity !== null && Number.isFinite(material.emissiveIntensity)) {
+                    gsap.to(material, {
+                        emissiveIntensity: targetEmissiveIntensity,
+                        duration,
+                        ease: cinematicCameraEase,
+                        onUpdate: () => {
+                            material.needsUpdate = true;
+                        }
+                    });
+                }
+            });
+        }
+
+        function registerGarageReflectionMaterial(material) {
+            if (!material) {
+                return false;
+            }
+
+            const supportsEnvMapIntensity = Number.isFinite(material.envMapIntensity);
+            const supportsRoughness = Number.isFinite(material.roughness);
+            const supportsMetalness = Number.isFinite(material.metalness);
+
+            const baseEnvMapIntensity = supportsEnvMapIntensity ? material.envMapIntensity : null;
+            const baseRoughness = supportsRoughness ? material.roughness : null;
+            const baseMetalness = supportsMetalness ? material.metalness : null;
+
+            const hasReflectiveResponse = (baseEnvMapIntensity !== null && baseEnvMapIntensity > 0.0001)
+                || (baseMetalness !== null && baseMetalness > 0.0001);
+
+            if (!hasReflectiveResponse) {
+                return false;
+            }
+
+            const existingEntry = introGarageReflectionTargets.find((entry) => entry.material === material);
+            if (existingEntry) {
+                existingEntry.baseEnvMapIntensity = baseEnvMapIntensity;
+                existingEntry.baseRoughness = baseRoughness;
+                existingEntry.baseMetalness = baseMetalness;
+            } else {
+                introGarageReflectionTargets.push({
+                    material,
+                    baseEnvMapIntensity,
+                    baseRoughness,
+                    baseMetalness
+                });
+            }
+
+            if (supportsEnvMapIntensity) {
+                material.envMapIntensity = 0;
+            }
+            if (supportsMetalness) {
+                material.metalness = 0;
+            }
+            if (supportsRoughness) {
+                material.roughness = 1;
+            }
+            material.needsUpdate = true;
+            return true;
+        }
+
+        function forceGarageReflectionOff() {
+            introGarageReflectionTargets.forEach(({ material }) => {
+                if (!material) {
+                    return;
+                }
+
+                if (Number.isFinite(material.envMapIntensity)) {
+                    material.envMapIntensity = 0;
+                }
+                if (Number.isFinite(material.metalness)) {
+                    material.metalness = 0;
+                }
+                if (Number.isFinite(material.roughness)) {
+                    material.roughness = 1;
+                }
+                material.needsUpdate = true;
+            });
+        }
+
+        function restoreGarageReflectionOn(duration = 0) {
+            introGarageReflectionTargets.forEach(({ material, baseEnvMapIntensity, baseRoughness, baseMetalness }) => {
+                if (!material) {
+                    return;
+                }
+
+                const applyImmediately = !Number.isFinite(duration) || duration <= 0 || typeof gsap === 'undefined';
+                if (applyImmediately) {
+                    if (baseEnvMapIntensity !== null && Number.isFinite(material.envMapIntensity)) {
+                        material.envMapIntensity = baseEnvMapIntensity;
+                    }
+                    if (baseMetalness !== null && Number.isFinite(material.metalness)) {
+                        material.metalness = baseMetalness;
+                    }
+                    if (baseRoughness !== null && Number.isFinite(material.roughness)) {
+                        material.roughness = baseRoughness;
+                    }
+                    material.needsUpdate = true;
+                    return;
+                }
+
+                const tweenVars = {
+                    duration,
+                    ease: cinematicCameraEase,
+                    onUpdate: () => {
+                        material.needsUpdate = true;
+                    }
+                };
+
+                if (baseEnvMapIntensity !== null && Number.isFinite(material.envMapIntensity)) {
+                    tweenVars.envMapIntensity = baseEnvMapIntensity;
+                }
+                if (baseMetalness !== null && Number.isFinite(material.metalness)) {
+                    tweenVars.metalness = baseMetalness;
+                }
+                if (baseRoughness !== null && Number.isFinite(material.roughness)) {
+                    tweenVars.roughness = baseRoughness;
+                }
+
+                gsap.to(material, tweenVars);
+            });
+        }
+
+        function forEachGaragePrimaryLightMaterial(callback) {
+            if (!garageModel || typeof callback !== 'function') {
+                return 0;
+            }
+
+            let processedCount = 0;
+
+            garageModel.traverse((node) => {
+                if (!node || !node.isMesh) {
+                    return;
+                }
+
+                const nodeName = typeof node.name === 'string' ? node.name.toLowerCase() : '';
+                const nodeMatched = nodeName === garagePrimaryLightNodeName
+                    || nodeName.includes(garagePrimaryLightNodeName)
+                    || nodeName === garagePrimaryLightMeshName
+                    || nodeName.includes(garagePrimaryLightMeshName);
+
+                const materials = Array.isArray(node.material)
+                    ? node.material
+                    : [node.material];
+
+                materials.forEach((material) => {
+                    if (!material) {
+                        return;
+                    }
+
+                    const materialName = typeof material.name === 'string' ? material.name.toLowerCase() : '';
+                    const materialMatched = materialName === garagePrimaryLightMaterialName
+                        || materialName.includes(garagePrimaryLightMaterialName);
+
+                    if (!nodeMatched && !materialMatched) {
+                        return;
+                    }
+
+                    callback(material, node);
+                    processedCount += 1;
+                });
+            });
+
+            return processedCount;
+        }
+
+        function forceGaragePrimaryLightOff() {
+            forEachGaragePrimaryLightMaterial((material) => {
+                if (material.color && material.color.isColor) {
+                    material.color.setRGB(0, 0, 0);
+                }
+
+                if (material.emissive && material.emissive.isColor) {
+                    material.emissive.setRGB(0, 0, 0);
+                }
+
+                if (Number.isFinite(material.emissiveIntensity)) {
+                    material.emissiveIntensity = 0;
+                }
+
+                if (
+                    material.userData
+                    && material.userData.gltfExtensions
+                    && material.userData.gltfExtensions.KHR_materials_emissive_strength
+                ) {
+                    material.userData.gltfExtensions.KHR_materials_emissive_strength.emissiveStrength = 0;
+                }
+
+                material.needsUpdate = true;
+            });
+        }
+
+        function restoreGaragePrimaryLightOn() {
+            forEachGaragePrimaryLightMaterial((material) => {
+                if (material.emissive && material.emissive.isColor) {
+                    material.emissive.setRGB(
+                        garagePrimaryLightEmissiveColor[0],
+                        garagePrimaryLightEmissiveColor[1],
+                        garagePrimaryLightEmissiveColor[2]
+                    );
+                }
+
+                material.emissiveIntensity = garagePrimaryLightEmissiveStrength;
+
+                if (
+                    material.userData
+                    && material.userData.gltfExtensions
+                    && material.userData.gltfExtensions.KHR_materials_emissive_strength
+                ) {
+                    material.userData.gltfExtensions.KHR_materials_emissive_strength.emissiveStrength = garagePrimaryLightEmissiveStrength;
+                }
+
+                material.needsUpdate = true;
+            });
+        }
+
+        function setIntroEnvironmentIntensityScale(scale) {
+            applyMaterialSurfaceLook(Math.max(0, Number(scale) || 0), defaultMinimumRoughness, true);
+        }
+
+        function turnOffAllIntroLights() {
+            [...introEnvironmentLightTargets, ...introNeonLightTargets].forEach(({ light }) => {
+                if (light) {
+                    light.intensity = 0;
+                }
+            });
+
+            [...introEnvironmentEmissiveTargets, ...introNeonEmissiveTargets].forEach(({ material }) => {
+                if (!material || !material.emissive) {
+                    return;
+                }
+
+                material.emissive.setRGB(0, 0, 0);
+                material.emissiveIntensity = 0;
+                material.needsUpdate = true;
+            });
+
+            [...introEnvironmentSelfLitTargets, ...introNeonSelfLitTargets].forEach(({ material }) => {
+                if (!material || !material.color || !material.color.isColor) {
+                    return;
+                }
+
+                material.color.setRGB(0, 0, 0);
+                material.needsUpdate = true;
+            });
+
+            forceGaragePrimaryLightOff();
+            forceGarageSurfaceOff();
+            forceGarageReflectionOff();
+
+            setIntroEnvironmentIntensityScale(0);
+        }
+
+        function revealIntroLightsOneByOne() {
+            if (introLightRevealCompleted || typeof gsap === 'undefined') {
+                introLightRevealCompleted = true;
+                neonFlickerEnabled = true;
+                restoreGaragePrimaryLightOn();
+                restoreGarageSurfaceOn(0);
+                restoreGarageReflectionOn(0);
+                setIntroEnvironmentIntensityScale(defaultEnvironmentIntensityScale);
+                return Promise.resolve();
+            }
+
+            if (
+                !introEnvironmentLightTargets.length
+                && !introNeonLightTargets.length
+                && !introEnvironmentEmissiveTargets.length
+                && !introNeonEmissiveTargets.length
+                && !introEnvironmentSelfLitTargets.length
+                && !introNeonSelfLitTargets.length
+                && !introGarageSurfaceTargets.length
+                && !introGarageReflectionTargets.length
+            ) {
+                introLightRevealCompleted = true;
+                neonFlickerEnabled = true;
+                restoreGaragePrimaryLightOn();
+                restoreGarageSurfaceOn(0);
+                restoreGarageReflectionOn(0);
+                setIntroEnvironmentIntensityScale(defaultEnvironmentIntensityScale);
+                return Promise.resolve();
+            }
+
+            if (introLightRevealTimeline) {
+                introLightRevealTimeline.kill();
+                introLightRevealTimeline = null;
+            }
+
+            neonFlickerEnabled = false;
+            turnOffAllIntroLights();
+
+            return new Promise((resolve) => {
+                const timeline = gsap.timeline({
+                    onComplete: () => {
+                        introLightRevealTimeline = null;
+                        introLightRevealCompleted = true;
+                        neonFlickerEnabled = true;
+                        restoreGarageSurfaceOn(0);
+                        restoreGarageReflectionOn(0);
+                        setIntroEnvironmentIntensityScale(defaultEnvironmentIntensityScale);
+                        resolve();
+                    }
+                });
+
+                let revealOffset = 0;
+
+                // Sequence 1: all garage.glb lights first.
+                timeline.add(() => {
+                    restoreGaragePrimaryLightOn();
+                    restoreGarageSurfaceOn(introLightRevealStepDuration);
+                    restoreGarageReflectionOn(introLightRevealStepDuration);
+                    playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                }, revealOffset);
+                revealOffset += introLightRevealStepDuration;
+
+                introEnvironmentLightTargets.forEach(({ light, targetIntensity }) => {
+                    timeline.add(() => {
+                        playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                    }, revealOffset);
+                    timeline.to(light, {
+                        intensity: targetIntensity,
+                        duration: introLightRevealStepDuration,
+                        ease: cinematicCameraEase
+                    }, revealOffset);
+                    revealOffset += introLightRevealStepDuration;
+                });
+
+                introEnvironmentEmissiveTargets.forEach(({ material, targetEmissiveIntensity, targetEmissiveColor }) => {
+                    timeline.add(() => {
+                        playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                    }, revealOffset);
+                    timeline.to(material, {
+                        emissiveIntensity: targetEmissiveIntensity,
+                        duration: introLightRevealStepDuration,
+                        ease: cinematicCameraEase,
+                        onUpdate: () => {
+                            material.needsUpdate = true;
+                        }
+                    }, revealOffset);
+
+                    if (material && material.emissive && targetEmissiveColor) {
+                        timeline.to(material.emissive, {
+                            r: targetEmissiveColor.r,
+                            g: targetEmissiveColor.g,
+                            b: targetEmissiveColor.b,
+                            duration: introLightRevealStepDuration,
+                            ease: cinematicCameraEase,
+                            onUpdate: () => {
+                                material.needsUpdate = true;
+                            }
+                        }, revealOffset);
+                    }
+
+                    revealOffset += introLightRevealStepDuration;
+                });
+
+                introEnvironmentSelfLitTargets.forEach(({ material, targetColor }) => {
+                    timeline.add(() => {
+                        playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                    }, revealOffset);
+                    timeline.to(material.color, {
+                        r: targetColor.r,
+                        g: targetColor.g,
+                        b: targetColor.b,
+                        duration: introLightRevealStepDuration,
+                        ease: cinematicCameraEase,
+                        onUpdate: () => {
+                            material.needsUpdate = true;
+                        }
+                    }, revealOffset);
+                    revealOffset += introLightRevealStepDuration;
+                });
+
+                // Sequence 2: environment light ramp after garage.glb lights.
+                const environmentIntensityProxy = { value: 0 };
+                timeline.add(() => {
+                    playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                }, revealOffset);
+                timeline.to(environmentIntensityProxy, {
+                    value: defaultEnvironmentIntensityScale,
+                    duration: introLightRevealStepDuration,
+                    ease: cinematicCameraEase,
+                    onUpdate: () => {
+                        setIntroEnvironmentIntensityScale(environmentIntensityProxy.value);
+                    }
+                }, revealOffset);
+                revealOffset += introLightRevealStepDuration;
+
+                // Sequence 3: neon lights last.
+
+                introNeonLightTargets.forEach(({ light, targetIntensity }) => {
+                    timeline.add(() => {
+                        playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                    }, revealOffset);
+                    timeline.to(light, {
+                        intensity: targetIntensity,
+                        duration: introLightRevealStepDuration,
+                        ease: cinematicCameraEase
+                    }, revealOffset);
+                    revealOffset += introLightRevealStepDuration;
+                });
+
+                introNeonEmissiveTargets.forEach(({ material, targetEmissiveIntensity, targetEmissiveColor }) => {
+                    timeline.add(() => {
+                        playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                    }, revealOffset);
+                    timeline.to(material, {
+                        emissiveIntensity: targetEmissiveIntensity,
+                        duration: introLightRevealStepDuration,
+                        ease: cinematicCameraEase,
+                        onUpdate: () => {
+                            material.needsUpdate = true;
+                        }
+                    }, revealOffset);
+
+                    if (material && material.emissive && targetEmissiveColor) {
+                        timeline.to(material.emissive, {
+                            r: targetEmissiveColor.r,
+                            g: targetEmissiveColor.g,
+                            b: targetEmissiveColor.b,
+                            duration: introLightRevealStepDuration,
+                            ease: cinematicCameraEase,
+                            onUpdate: () => {
+                                material.needsUpdate = true;
+                            }
+                        }, revealOffset);
+                    }
+
+                    revealOffset += introLightRevealStepDuration;
+                });
+
+                introNeonSelfLitTargets.forEach(({ material, targetColor }) => {
+                    timeline.add(() => {
+                        playIntroLightTurnOnSound(introLightTurnOnAudioVolume);
+                    }, revealOffset);
+                    timeline.to(material.color, {
+                        r: targetColor.r,
+                        g: targetColor.g,
+                        b: targetColor.b,
+                        duration: introLightRevealStepDuration,
+                        ease: cinematicCameraEase,
+                        onUpdate: () => {
+                            material.needsUpdate = true;
+                        }
+                    }, revealOffset);
+                    revealOffset += introLightRevealStepDuration;
+                });
+
+                introLightRevealTimeline = timeline;
+            });
+        }
+
+        function getShotPreset(shotKey) {
+            if (!shotKey || !Object.prototype.hasOwnProperty.call(introShotPresets, shotKey)) {
+                return null;
+            }
+
+            return introShotPresets[shotKey];
+        }
+
+        function applyShotImmediate(shotKey) {
+            const shot = getShotPreset(shotKey);
+            if (!shot || !camera || !controls) {
+                return false;
+            }
+
+            if (modelPivot) {
+                modelPivot.getWorldPosition(pivotWorldPosition);
+            }
+
+            const position = orbitPosition(
+                pivotWorldPosition,
+                shot.pos[0],
+                shot.pos[1],
+                shot.pos[2]
+            );
+
+            introCameraAimOffset.set(shot.aim[0], shot.aim[1], shot.aim[2]);
+            introCameraOverrideActive = true;
+            camera.position.copy(position);
+            controls.target.set(
+                pivotWorldPosition.x + introCameraAimOffset.x,
+                pivotWorldPosition.y + introCameraAimOffset.y,
+                pivotWorldPosition.z + introCameraAimOffset.z
+            );
+            controls.update();
+            return true;
+        }
+
+        function tweenToShot(shotKey, duration, ease = cinematicCameraEase) {
+            const shot = getShotPreset(shotKey);
+            if (!shot || !camera || !controls) {
+                return gsap.timeline();
+            }
+
+            if (modelPivot) {
+                modelPivot.getWorldPosition(pivotWorldPosition);
+            }
+
+            const position = orbitPosition(
+                pivotWorldPosition,
+                shot.pos[0],
+                shot.pos[1],
+                shot.pos[2]
+            );
+
+            introCameraOverrideActive = true;
+
+            return gsap.timeline()
+                .to(camera.position, {
+                    x: position.x,
+                    y: position.y,
+                    z: position.z,
+                    duration,
+                    ease
+                }, 0)
+                .to(introCameraAimOffset, {
+                    x: shot.aim[0],
+                    y: shot.aim[1],
+                    z: shot.aim[2],
+                    duration,
+                    ease
+                }, 0);
+        }
+
+        function snapToShot(shotKey, duration = cinematicCameraTransitionDuration, ease = cinematicCameraEase) {
+            return tweenToShot(shotKey, Math.max(0.001, duration), ease);
+        }
+
+        function revertActiveSplitTextInstances() {
+            if (!activeSplitTextInstances.length) {
+                return;
+            }
+
+            for (const splitInstance of activeSplitTextInstances) {
+                if (!splitInstance || typeof splitInstance.revert !== 'function') {
+                    continue;
+                }
+
+                try {
+                    splitInstance.revert();
+                } catch (error) {
+                    // Ignore split revert errors for already-restored nodes.
+                }
+            }
+
+            activeSplitTextInstances.length = 0;
+        }
+
+        function createSplitTextForElement(element, type = 'chars') {
+            if (!element) {
+                return {
+                    chars: [],
+                    words: [],
+                    revert: () => {}
+                };
+            }
+
+            const splitTextPlugin = (typeof window !== 'undefined' && typeof window.SplitText === 'function')
+                ? window.SplitText
+                : null;
+
+            if (splitTextPlugin) {
+                try {
+                    if (!gsap.plugins.SplitText) {
+                        gsap.registerPlugin(splitTextPlugin);
+                    }
+
+                    const splitInstance = new splitTextPlugin(element, { type });
+                    activeSplitTextInstances.push(splitInstance);
+                    return splitInstance;
+                } catch (error) {
+                    // Fallback to manual splitting if plugin init fails.
+                }
+            }
+
+            const originalText = element.textContent || '';
+            const pieces = type === 'words'
+                ? originalText.split(/\s+/).filter(Boolean)
+                : Array.from(originalText);
+
+            element.textContent = '';
+            const nodes = [];
+
+            pieces.forEach((piece, index) => {
+                const span = document.createElement('span');
+                span.className = type === 'words' ? 'split-word' : 'split-char';
+                span.textContent = piece;
+                element.appendChild(span);
+                nodes.push(span);
+
+                if (type === 'words' && index < pieces.length - 1) {
+                    element.appendChild(document.createTextNode(' '));
+                }
+            });
+
+            const manualSplit = {
+                chars: type === 'chars' ? nodes : [],
+                words: type === 'words' ? nodes : [],
+                revert: () => {
+                    element.textContent = originalText;
+                }
+            };
+
+            activeSplitTextInstances.push(manualSplit);
+            return manualSplit;
+        }
+
+        function showCinematicText(title, spec = '', holdDuration = 2) {
+            const container = document.getElementById('cinematic-text');
+            if (!container) {
+                return gsap.timeline();
+            }
+
+            if (cinematicTextTimeline) {
+                cinematicTextTimeline.kill();
+                cinematicTextTimeline = null;
+            }
+
+            revertActiveSplitTextInstances();
+
+            container.style.opacity = '1';
+            container.classList.add('active');
+            container.innerHTML = '';
+
+            const timeline = gsap.timeline({
+                onComplete: () => {
+                    revertActiveSplitTextInstances();
+                    if (cinematicTextTimeline === timeline) {
+                        cinematicTextTimeline = null;
+                    }
+                    container.innerHTML = '';
+                    container.style.opacity = '1';
+                    container.classList.remove('active');
+                }
+            });
+            cinematicTextTimeline = timeline;
+
+            const titleLine = document.createElement('span');
+            titleLine.className = 'cinematic-line title';
+            titleLine.textContent = title;
+            titleLine.style.opacity = '1';
+            titleLine.style.transform = 'none';
+            container.appendChild(titleLine);
+
+            const titleSplit = createSplitTextForElement(titleLine, 'chars');
+            const titleCharsRaw = Array.isArray(titleSplit.chars)
+                ? titleSplit.chars
+                : [];
+            const titleChars = titleCharsRaw.length ? titleCharsRaw : [titleLine];
+
+            timeline.fromTo(titleChars, {
+                opacity: 0,
+                y: 74,
+                rotateX: -90,
+                filter: 'blur(12px)'
+            }, {
+                opacity: 1,
+                y: 0,
+                rotateX: 0,
+                filter: 'blur(0px)',
+                duration: 0.95,
+                ease: 'back.out(1.6)',
+                stagger: {
+                    each: 0.018,
+                    from: 'center'
+                }
+            }, 0);
+
+            if (spec) {
+                const specLine = document.createElement('span');
+                specLine.className = 'cinematic-line spec';
+                specLine.textContent = spec;
+                specLine.style.opacity = '1';
+                specLine.style.transform = 'none';
+                container.appendChild(specLine);
+
+                const specSplit = createSplitTextForElement(specLine, 'words');
+                const specWords = (Array.isArray(specSplit.words) && specSplit.words.length)
+                    ? specSplit.words
+                    : ((Array.isArray(specSplit.chars) && specSplit.chars.length) ? specSplit.chars : [specLine]);
+
+                timeline
+                    .fromTo(specWords, {
+                        opacity: 0,
+                        y: 16,
+                        filter: 'blur(6px)'
+                    }, {
+                        opacity: 1,
+                        y: 0,
+                        filter: 'blur(0px)',
+                        duration: 0.55,
+                        ease: 'power2.out'
+                    }, 0.16);
+            }
+
+            timeline.to(titleChars, {
+                opacity: 0,
+                y: -26,
+                duration: 0.32,
+                ease: 'power1.in',
+                stagger: {
+                    each: 0.01,
+                    from: 'end'
+                }
+            }, `+=${holdDuration}`);
+
+            timeline.to(container, {
+                opacity: 0,
+                duration: 0.22,
+                ease: 'power1.in'
+            }, '<');
+
+            return timeline;
+        }
+
+        function flickerNeonOn() {
+            const timeline = gsap.timeline();
+
+            neonFlickerLights.forEach(({ light, baseIntensity }, index) => {
+                light.intensity = 0;
+                const delay = 0.05 + index * 0.08;
+
+                for (let flickerIndex = 0; flickerIndex < 5; flickerIndex += 1) {
+                    const flickerDelay = delay + flickerIndex * 0.07 + Math.random() * 0.04;
+                    const flickerValue = flickerIndex % 2 === 0 ? baseIntensity * 0.6 : 0;
+                    timeline.to(light, {
+                        intensity: flickerValue,
+                        duration: 0.04
+                    }, flickerDelay);
+                }
+
+                timeline.to(light, {
+                    intensity: baseIntensity,
+                    duration: 0.25,
+                    ease: 'power2.out'
+                }, delay + 0.45);
+            });
+
+            return timeline;
+        }
+
+        function openIntroLetterbox() {
+            const topBar = document.getElementById('letterbox-top');
+            const bottomBar = document.getElementById('letterbox-bottom');
+            if (topBar) {
+                topBar.classList.add('open');
+            }
+            if (bottomBar) {
+                bottomBar.classList.add('open');
+            }
+        }
+
+        function closeIntroLetterbox() {
+            const topBar = document.getElementById('letterbox-top');
+            const bottomBar = document.getElementById('letterbox-bottom');
+            if (topBar) {
+                topBar.classList.remove('open');
+            }
+            if (bottomBar) {
+                bottomBar.classList.remove('open');
+            }
+        }
+
+        function fadeOutIntroMusic(duration = 0.8) {
+            if (!introMusicNode || !introMusicNode.gain) {
+                introMusicNode = null;
+                return;
+            }
+
+            const activeMusicNode = introMusicNode;
+            gsap.to(activeMusicNode.gain.gain, {
+                value: 0,
+                duration,
+                onComplete: () => {
+                    try {
+                        activeMusicNode.source.stop();
+                        activeMusicNode.source.disconnect();
+                        activeMusicNode.gain.disconnect();
+                    } catch (error) {
+                        // Ignore already-stopped node cleanup errors.
+                    }
+                }
+            });
+            introMusicNode = null;
+        }
+
+        async function onStartExperienceClicked() {
+            if (introSequenceHasStarted) {
+                return;
+            }
+
+            introSequenceHasStarted = true;
+            introActive = true;
+
+            await preloadIntroAudio();
+
+            const audioContext = getOrCreateSharedAudioContext();
+            if (audioContext && audioContext.state === 'suspended') {
+                try {
+                    await audioContext.resume();
+                } catch (error) {
+                    // Resume can fail without gesture in some browsers.
+                }
+            }
+
+            const overlay = document.getElementById('intro-overlay');
+            if (overlay) {
+                overlay.classList.remove('visible');
+                window.setTimeout(() => {
+                    if (overlay.parentNode) {
+                        overlay.parentNode.removeChild(overlay);
+                    }
+                }, 700);
+            }
+
+            if (controls) {
+                controls.enabled = false;
+            }
+            lenis.stop();
+
+            await revealIntroLightsOneByOne();
+
+            const skipButton = document.getElementById('skip-intro');
+            if (skipButton) {
+                skipButton.style.display = 'block';
+                gsap.fromTo(skipButton, { opacity: 0 }, { opacity: 1, duration: 0.8, delay: 0.2 });
+            }
+
+            openIntroLetterbox();
+            runDirectorsCutIntro();
+        }
+
+        function runDirectorsCutIntro() {
+            if (!camera || !controls) {
+                return;
+            }
+
+            if (introTimeline) {
+                introTimeline.kill();
+                introTimeline = null;
+            }
+
+            steerLeftPressed = false;
+            steerRightPressed = false;
+            steeringTargetAngle = 0;
+            introCameraOverrideActive = true;
+
+            introTimeline = gsap.timeline({
+                defaults: { ease: 'power2.inOut' },
+                onComplete: endIntro
+            });
+
+            const timeline = introTimeline;
+
+            timeline.add(snapToShot('wide', 2), 0);
+
+            timeline.add(flickerNeonOn(), 0);
+            timeline.add(() => {
+                void startEngineAudioPlayback();
+            }, 0.2);
+
+            timeline.add(() => {
+                showCinematicText('Porsche 911 GT3 RS', '', 1.6);
+            }, 1.2);
+            timeline.add(() => {
+                introMusicNode = playPreloadedIntroAudio('cinematicDrone', 0, true);
+                if (introMusicNode && introMusicNode.gain) {
+                    gsap.to(introMusicNode.gain.gain, { value: 0.32, duration: 2 });
+                }
+            }, 1);
+
+            timeline.add(snapToShot('lowWheel', 2), 3.5);
+            timeline.add(() => {
+                showCinematicText('9,000 RPM Redline', 'Motorsport-Derived Engine', 1.8);
+            }, 3.7);
+            timeline.add(() => {
+                wheelAutoSpin = true;
+                wheelSpinSpeed = 6;
+            }, 3.8);
+
+            timeline.add(snapToShot('rearWing', 2), 5.8);
+            timeline.add(() => {
+                showCinematicText('4.0L Naturally Aspirated Flat-Six', '510 HP - 9,000 RPM', 2);
+            }, 6.0);
+
+            timeline.add(snapToShot('sidePull', 2), 8.0);
+            timeline.add(() => {
+                setDoorOpenState(true);
+                playPreloadedIntroAudio('doorOpen', 0.9);
+            }, 8.0);
+            timeline.add(() => {
+                showCinematicText('Full Carbon Fibre Interior', 'Track-Ready from the Factory', 2);
+            }, 8.5);
+            timeline.add(() => {
+                neonFlickerLights.forEach(({ light, baseIntensity }) => {
+                    gsap.to(light, {
+                        intensity: baseIntensity * 2.2,
+                        duration: 0.15,
+                        yoyo: true,
+                        repeat: 1
+                    });
+                });
+            }, 8.3);
+
+            timeline.add(() => {
+                setDoorOpenState(false);
+                playPreloadedIntroAudio('doorClose', 0.84);
+            }, 10.9);
+
+            timeline.add(() => {
+                introCameraOverrideActive = false;
+                enterInteriorCameraMode(true);
+            }, 11.0);
+            timeline.add(() => {
+                showCinematicText("Driver's Seat Experience", '', 1.6);
+            }, 11.4);
+
+            timeline.add(() => {
+                resetInteriorCameraMode(false, false);
+                introCameraOverrideActive = true;
+            }, 13.2);
+            timeline.add(snapToShot('heroShot', 2), 13.2);
+            timeline.add(() => {
+                showCinematicText('527 HP. No Compromises.', '', 2.5);
+            }, 14.0);
+            const heroSteeringProxy = { angle: 0 };
+            timeline.add(() => {
+                playPreloadedIntroAudio('heroRev', 1);
+                wheelAutoSpin = true;
+                wheelSpinSpeed = 12;
+                neonFlickerLights.forEach(({ light, baseIntensity }) => {
+                    gsap.to(light, {
+                        intensity: baseIntensity * 1.8,
+                        duration: 0.1,
+                        yoyo: true,
+                        repeat: 3,
+                        ease: 'none'
+                    });
+                });
+            }, 14.2);
+            timeline.to(heroSteeringProxy, {
+                angle: maxSteeringAngle,
+                duration: 0.9,
+                ease: 'power2.out',
+                onUpdate: () => {
+                    steeringTargetAngle = heroSteeringProxy.angle;
+                }
+            }, 14.2);
+
+            timeline.add(() => {
+                fadeOutIntroMusic(1.8);
+            }, 15.8);
+        }
+
+        function activateUserControl() {
+            const overlay = document.getElementById('intro-overlay');
+            if (overlay) {
+                overlay.classList.remove('visible');
+                window.setTimeout(() => {
+                    if (overlay.parentNode) {
+                        overlay.parentNode.removeChild(overlay);
+                    }
+                }, 700);
+            }
+
+            introActive = false;
+            introCameraOverrideActive = false;
+            resetVehicleStateForTakeControl();
+            if (controls) {
+                controls.enabled = true;
+            }
+            lenis.start();
+
+            const chips = document.querySelectorAll('.hint-chip');
+            if (chips.length) {
+                gsap.to(chips, {
+                    opacity: 1,
+                    y: 0,
+                    duration: 0.5,
+                    stagger: 0.12,
+                    ease: 'power2.out',
+                    delay: 0.3,
+                    onComplete: () => {
+                        gsap.to(chips, {
+                            opacity: 0,
+                            duration: 0.8,
+                            delay: 5
+                        });
+                    }
+                });
+            }
+        }
+
+        function endIntro() {
+            if (!introSequenceHasStarted) {
+                return;
+            }
+
+            introTimeline = null;
+            introCameraOverrideActive = false;
+            steeringTargetAngle = 0;
+            closeIntroLetterbox();
+
+            const skipButton = document.getElementById('skip-intro');
+            if (skipButton) {
+                gsap.to(skipButton, {
+                    opacity: 0,
+                    duration: 0.3,
+                    onComplete: () => {
+                        skipButton.style.display = 'none';
+                    }
+                });
+            }
+
+            const textContainer = document.getElementById('cinematic-text');
+            if (textContainer) {
+                gsap.to(textContainer, {
+                    opacity: 0,
+                    duration: 0.3,
+                    onComplete: () => {
+                        textContainer.innerHTML = '';
+                        textContainer.style.opacity = '1';
+                    }
+                });
+            }
+
+            fadeOutIntroMusic(0.9);
+
+            const existingOverlay = document.getElementById('intro-overlay');
+            if (existingOverlay) {
+                existingOverlay.remove();
+            }
+
+            const overlay = document.createElement('div');
+            overlay.id = 'intro-overlay';
+            overlay.innerHTML = `
+                <p class="intro-overlay-subtitle">The stage is yours</p>
+                <button class="intro-btn" id="take-control-btn">Take Control</button>
+                <p class="intro-overlay-secondary">
+                    <span id="replay-intro">Replay Intro</span>
+                </p>
+            `;
+            document.body.appendChild(overlay);
+            window.setTimeout(() => {
+                overlay.classList.add('visible');
+            }, 30);
+
+            const takeControlButton = document.getElementById('take-control-btn');
+            if (takeControlButton) {
+                takeControlButton.addEventListener('click', activateUserControl, { once: true });
+            }
+
+            const replayButton = document.getElementById('replay-intro');
+            if (replayButton) {
+                replayButton.addEventListener('click', () => {
+                    overlay.classList.remove('visible');
+                    window.setTimeout(() => {
+                        if (overlay.parentNode) {
+                            overlay.parentNode.removeChild(overlay);
+                        }
+                        replayIntro();
+                    }, 450);
+                }, { once: true });
+            }
+        }
+
+        function skipIntro() {
+            if (!introActive) {
+                return;
+            }
+
+            if (introTimeline) {
+                introTimeline.kill();
+                introTimeline = null;
+            }
+
+            wheelAutoSpin = true;
+            wheelSpinSpeed = 3;
+            setDoorOpenState(false);
+            if (interiorCameraActive) {
+                resetInteriorCameraMode(false);
+            }
+
+            steerLeftPressed = false;
+            steerRightPressed = false;
+            steeringTargetAngle = 0;
+            introCameraOverrideActive = true;
+            applyShotImmediate('heroShot');
+            fadeOutIntroMusic(0.6);
+            void startEngineAudioPlayback();
+
+            const textContainer = document.getElementById('cinematic-text');
+            if (textContainer) {
+                textContainer.innerHTML = '';
+            }
+
+            endIntro();
+        }
+
+        function replayIntro() {
+            if (introTimeline) {
+                introTimeline.kill();
+                introTimeline = null;
+            }
+
+            introActive = true;
+            introSequenceHasStarted = true;
+            wheelAutoSpin = false;
+            wheelSpinSpeed = 0;
+            setDoorOpenState(false);
+            if (interiorCameraActive) {
+                resetInteriorCameraMode(false);
+            }
+
+            steerLeftPressed = false;
+            steerRightPressed = false;
+            steeringTargetAngle = 0;
+            stopEngineAudioPlayback({ playDampedStopEffect: false });
+            fadeOutIntroMusic(0.2);
+
+            buildIntroDOM(false);
+
+            const skipButton = document.getElementById('skip-intro');
+            if (skipButton) {
+                skipButton.style.display = 'block';
+                skipButton.style.opacity = '1';
+            }
+
+            const textContainer = document.getElementById('cinematic-text');
+            if (textContainer) {
+                textContainer.innerHTML = '';
+                textContainer.style.opacity = '1';
+            }
+
+            openIntroLetterbox();
+
+            if (controls) {
+                controls.enabled = false;
+            }
+            lenis.stop();
+
+            introCameraOverrideActive = true;
+            applyShotImmediate('wide');
+            runDirectorsCutIntro();
+        }
+
+        function initCameraDebugStudio() {
+            return;
+            if (cameraDebugStudioReady || !camera || !controls) {
+                return;
+            }
+
+            cameraDebugStudioReady = true;
+            let isScrubbingIntroTimeline = false;
+
+            const panel = document.createElement('div');
+            panel.id = 'cam-debug';
+            panel.innerHTML = `
+                <div id="cam-debug-header">
+                    <span>INTRO CAM DEBUG</span>
+                    <button id="cam-debug-toggle" type="button">-</button>
+                </div>
+                <div id="cam-debug-body">
+                    <div class="dbg-section">
+                        <div class="dbg-label">Live Camera</div>
+                        <div class="dbg-coords">
+                            <span class="dbg-axis">X</span><span class="dbg-val" id="dbg-px">0</span>
+                            <span class="dbg-axis">Y</span><span class="dbg-val" id="dbg-py">0</span>
+                            <span class="dbg-axis">Z</span><span class="dbg-val" id="dbg-pz">0</span>
+                        </div>
+                        <div class="dbg-label" style="margin-top:8px">Target</div>
+                        <div class="dbg-coords">
+                            <span class="dbg-axis">X</span><span class="dbg-val aim" id="dbg-tx">0</span>
+                            <span class="dbg-axis">Y</span><span class="dbg-val aim" id="dbg-ty">0</span>
+                            <span class="dbg-axis">Z</span><span class="dbg-val aim" id="dbg-tz">0</span>
+                        </div>
+                    </div>
+                    <div class="dbg-section">
+                        <div class="dbg-label">Start Camera Animation</div>
+                        <div class="dbg-nudge-row">
+                            <button class="dbg-btn" id="dbg-intro-run" type="button">Run Intro</button>
+                            <button class="dbg-btn" id="dbg-intro-playpause" type="button">Play</button>
+                            <button class="dbg-btn" id="dbg-intro-replay" type="button">Replay</button>
+                            <button class="dbg-btn" id="dbg-intro-skip" type="button">Skip</button>
+                        </div>
+                        <div class="dbg-nudge-row" style="margin-top:8px;">
+                            <input class="dbg-range" id="dbg-intro-scrub" type="range" min="0" max="20" step="0.01" value="0">
+                        </div>
+                        <div class="dbg-label" id="dbg-intro-status" style="margin-top:6px; color:#7dd3fc;">t=0.00s · idle</div>
+                        <div class="dbg-label" style="margin-top:6px">Beat Jump</div>
+                        <div class="dbg-nudge-row" id="dbg-intro-beats"></div>
+                    </div>
+                    <div class="dbg-section">
+                        <div class="dbg-label">Live Shot Editor</div>
+                        <div class="dbg-nudge-row">
+                            <select id="dbg-shot-select" class="dbg-select"></select>
+                            <button class="dbg-btn" id="dbg-shot-load" type="button">Load</button>
+                            <button class="dbg-btn" id="dbg-shot-preview" type="button">Preview</button>
+                        </div>
+                        <div class="dbg-grid-inputs">
+                            <span class="dbg-axis">r</span><input id="dbg-shot-r" class="dbg-input" type="number" step="0.01">
+                            <span class="dbg-axis">h</span><input id="dbg-shot-h" class="dbg-input" type="number" step="0.01">
+                            <span class="dbg-axis">deg</span><input id="dbg-shot-deg" class="dbg-input" type="number" step="0.01">
+                            <span class="dbg-axis">ax</span><input id="dbg-shot-ax" class="dbg-input" type="number" step="0.01">
+                            <span class="dbg-axis">ay</span><input id="dbg-shot-ay" class="dbg-input" type="number" step="0.01">
+                            <span class="dbg-axis">az</span><input id="dbg-shot-az" class="dbg-input" type="number" step="0.01">
+                        </div>
+                        <div class="dbg-nudge-row">
+                            <button class="dbg-btn" id="dbg-shot-apply" type="button">Apply Live</button>
+                            <button class="dbg-btn" id="dbg-shot-current" type="button">Use Current</button>
+                        </div>
+                        <div class="dbg-label" id="dbg-shot-status" style="margin-top:6px; color:#7dd3fc;">Preset: none</div>
+                    </div>
+                    <div class="dbg-section">
+                        <div class="dbg-label">Export Values</div>
+                        <div class="dbg-nudge-row">
+                            <button class="dbg-btn" id="dbg-capture-current" type="button">Capture Current</button>
+                            <button class="dbg-btn" id="dbg-export-beats" type="button">Export Beats</button>
+                            <button class="dbg-btn" id="dbg-copy-output" type="button">Copy</button>
+                        </div>
+                        <textarea id="dbg-output" class="dbg-output" readonly placeholder="Timeline camera values will appear here..."></textarea>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(panel);
+
+            const introRunButton = panel.querySelector('#dbg-intro-run');
+            const introPlayPauseButton = panel.querySelector('#dbg-intro-playpause');
+            const introReplayButton = panel.querySelector('#dbg-intro-replay');
+            const introSkipButton = panel.querySelector('#dbg-intro-skip');
+            const introScrubInput = panel.querySelector('#dbg-intro-scrub');
+            const introStatusLabel = panel.querySelector('#dbg-intro-status');
+            const introBeatButtons = panel.querySelector('#dbg-intro-beats');
+            const captureCurrentButton = panel.querySelector('#dbg-capture-current');
+            const exportBeatsButton = panel.querySelector('#dbg-export-beats');
+            const copyOutputButton = panel.querySelector('#dbg-copy-output');
+            const debugOutput = panel.querySelector('#dbg-output');
+            const shotPresetSelect = panel.querySelector('#dbg-shot-select');
+            const shotLoadButton = panel.querySelector('#dbg-shot-load');
+            const shotPreviewButton = panel.querySelector('#dbg-shot-preview');
+            const shotApplyButton = panel.querySelector('#dbg-shot-apply');
+            const shotUseCurrentButton = panel.querySelector('#dbg-shot-current');
+            const shotStatusLabel = panel.querySelector('#dbg-shot-status');
+            const shotRadiusInput = panel.querySelector('#dbg-shot-r');
+            const shotHeightInput = panel.querySelector('#dbg-shot-h');
+            const shotAngleInput = panel.querySelector('#dbg-shot-deg');
+            const shotAimXInput = panel.querySelector('#dbg-shot-ax');
+            const shotAimYInput = panel.querySelector('#dbg-shot-ay');
+            const shotAimZInput = panel.querySelector('#dbg-shot-az');
+            const shotEditorInputs = [
+                shotRadiusInput,
+                shotHeightInput,
+                shotAngleInput,
+                shotAimXInput,
+                shotAimYInput,
+                shotAimZInput
+            ].filter(Boolean);
+
+            const toRounded = (value, digits = 4) => Number(value.toFixed(digits));
+
+            let isLoadingShotInputs = false;
+
+            const setShotStatus = (message) => {
+                if (shotStatusLabel) {
+                    shotStatusLabel.textContent = message;
+                }
+            };
+
+            const getActiveShotKey = () => {
+                if (!shotPresetSelect || !shotPresetSelect.value) {
+                    return null;
+                }
+
+                return shotPresetSelect.value;
+            };
+
+            const populateShotPresetSelect = () => {
+                if (!shotPresetSelect) {
+                    return;
+                }
+
+                const shotKeys = Object.keys(introShotPresets);
+                shotPresetSelect.innerHTML = '';
+
+                shotKeys.forEach((shotKey) => {
+                    const option = document.createElement('option');
+                    option.value = shotKey;
+                    option.textContent = shotKey;
+                    shotPresetSelect.appendChild(option);
+                });
+
+                if (shotKeys.length) {
+                    shotPresetSelect.value = shotKeys[0];
+                }
+            };
+
+            const loadShotPresetToInputs = (shotKey = getActiveShotKey()) => {
+                if (!shotKey || !Object.prototype.hasOwnProperty.call(introShotPresets, shotKey)) {
+                    setShotStatus('Preset: unavailable');
+                    return false;
+                }
+
+                const shot = introShotPresets[shotKey];
+                isLoadingShotInputs = true;
+
+                if (shotRadiusInput) {
+                    shotRadiusInput.value = shot.pos[0].toFixed(4);
+                }
+                if (shotHeightInput) {
+                    shotHeightInput.value = shot.pos[1].toFixed(4);
+                }
+                if (shotAngleInput) {
+                    shotAngleInput.value = shot.pos[2].toFixed(4);
+                }
+                if (shotAimXInput) {
+                    shotAimXInput.value = shot.aim[0].toFixed(4);
+                }
+                if (shotAimYInput) {
+                    shotAimYInput.value = shot.aim[1].toFixed(4);
+                }
+                if (shotAimZInput) {
+                    shotAimZInput.value = shot.aim[2].toFixed(4);
+                }
+
+                isLoadingShotInputs = false;
+                setShotStatus(`Preset: ${shotKey}`);
+                return true;
+            };
+
+            const readShotInputs = () => {
+                const values = [
+                    shotRadiusInput,
+                    shotHeightInput,
+                    shotAngleInput,
+                    shotAimXInput,
+                    shotAimYInput,
+                    shotAimZInput
+                ].map((input) => (input ? Number.parseFloat(input.value) : Number.NaN));
+
+                if (values.some((value) => !Number.isFinite(value))) {
+                    return null;
+                }
+
+                return {
+                    radius: values[0],
+                    height: values[1],
+                    angle: values[2],
+                    aimX: values[3],
+                    aimY: values[4],
+                    aimZ: values[5]
+                };
+            };
+
+            const applyShotInputsToPreset = ({ preview = true, source = 'manual' } = {}) => {
+                const shotKey = getActiveShotKey();
+                if (!shotKey || !Object.prototype.hasOwnProperty.call(introShotPresets, shotKey)) {
+                    return false;
+                }
+
+                const inputValues = readShotInputs();
+                if (!inputValues) {
+                    setShotStatus(`Preset: ${shotKey} (invalid input)`);
+                    return false;
+                }
+
+                const shot = introShotPresets[shotKey];
+                shot.pos[0] = inputValues.radius;
+                shot.pos[1] = inputValues.height;
+                shot.pos[2] = inputValues.angle;
+                shot.aim[0] = inputValues.aimX;
+                shot.aim[1] = inputValues.aimY;
+                shot.aim[2] = inputValues.aimZ;
+
+                if (preview) {
+                    if (introTimeline && !introTimeline.paused()) {
+                        introTimeline.pause();
+                    }
+
+                    introCameraOverrideActive = true;
+                    applyShotImmediate(shotKey);
+                }
+
+                setShotStatus(`Preset: ${shotKey} (${source})`);
+                return true;
+            };
+
+            const captureCurrentIntoShotInputs = () => {
+                const shotKey = getActiveShotKey();
+                if (!shotKey) {
+                    return false;
+                }
+
+                if (modelPivot) {
+                    modelPivot.getWorldPosition(pivotWorldPosition);
+                }
+
+                const dx = camera.position.x - pivotWorldPosition.x;
+                const dz = camera.position.z - pivotWorldPosition.z;
+                const radiusXZ = Math.sqrt((dx * dx) + (dz * dz));
+                const angleDeg = THREE.MathUtils.radToDeg(Math.atan2(dz, dx));
+
+                isLoadingShotInputs = true;
+                if (shotRadiusInput) {
+                    shotRadiusInput.value = radiusXZ.toFixed(4);
+                }
+                if (shotHeightInput) {
+                    shotHeightInput.value = (camera.position.y - pivotWorldPosition.y).toFixed(4);
+                }
+                if (shotAngleInput) {
+                    shotAngleInput.value = angleDeg.toFixed(4);
+                }
+                if (shotAimXInput) {
+                    shotAimXInput.value = (controls.target.x - pivotWorldPosition.x).toFixed(4);
+                }
+                if (shotAimYInput) {
+                    shotAimYInput.value = (controls.target.y - pivotWorldPosition.y).toFixed(4);
+                }
+                if (shotAimZInput) {
+                    shotAimZInput.value = (controls.target.z - pivotWorldPosition.z).toFixed(4);
+                }
+                isLoadingShotInputs = false;
+
+                return applyShotInputsToPreset({ preview: false, source: 'captured' });
+            };
+
+            const getCameraSnapshot = (label = 'manual') => {
+                if (modelPivot) {
+                    modelPivot.getWorldPosition(pivotWorldPosition);
+                }
+
+                const dx = camera.position.x - pivotWorldPosition.x;
+                const dz = camera.position.z - pivotWorldPosition.z;
+                const radiusXZ = Math.sqrt((dx * dx) + (dz * dz));
+                const angleDeg = THREE.MathUtils.radToDeg(Math.atan2(dz, dx));
+
+                return {
+                    label,
+                    time: toRounded(introTimeline ? introTimeline.time() : 0, 2),
+                    camera: [
+                        toRounded(camera.position.x),
+                        toRounded(camera.position.y),
+                        toRounded(camera.position.z)
+                    ],
+                    target: [
+                        toRounded(controls.target.x),
+                        toRounded(controls.target.y),
+                        toRounded(controls.target.z)
+                    ],
+                    pivot: [
+                        toRounded(pivotWorldPosition.x),
+                        toRounded(pivotWorldPosition.y),
+                        toRounded(pivotWorldPosition.z)
+                    ],
+                    shotPos: [
+                        toRounded(radiusXZ),
+                        toRounded(camera.position.y - pivotWorldPosition.y),
+                        toRounded(angleDeg, 2)
+                    ],
+                    aimOffset: [
+                        toRounded(controls.target.x - pivotWorldPosition.x),
+                        toRounded(controls.target.y - pivotWorldPosition.y),
+                        toRounded(controls.target.z - pivotWorldPosition.z)
+                    ],
+                    interiorCameraActive: Boolean(interiorCameraActive)
+                };
+            };
+
+            const setOutputPayload = (payload) => {
+                if (!debugOutput) {
+                    return;
+                }
+
+                debugOutput.value = JSON.stringify(payload, null, 2);
+            };
+
+            const waitForIntroTimeline = (timeoutMs = 3000) => new Promise((resolve) => {
+                const startedAt = performance.now();
+
+                const pollTimeline = () => {
+                    if (introTimeline) {
+                        resolve(true);
+                        return;
+                    }
+
+                    if ((performance.now() - startedAt) >= timeoutMs) {
+                        resolve(false);
+                        return;
+                    }
+
+                    window.setTimeout(pollTimeline, 50);
+                };
+
+                pollTimeline();
+            });
+
+            const runIntroForDebug = () => {
+                if (!introSequenceHasStarted) {
+                    void onStartExperienceClicked();
+                    return;
+                }
+
+                replayIntro();
+            };
+
+            const seekIntroTimeline = (timeSeconds) => {
+                if (!introTimeline) {
+                    return false;
+                }
+
+                const timelineDuration = Number.isFinite(introTimeline.duration())
+                    ? introTimeline.duration()
+                    : 20;
+                const clampedTime = THREE.MathUtils.clamp(timeSeconds, 0, timelineDuration);
+
+                introTimeline.pause();
+                introTimeline.seek(clampedTime, true);
+                introCameraOverrideActive = clampedTime <= 10.95 || clampedTime >= 16;
+                return true;
+            };
+
+            const exportBeatSnapshots = async () => {
+                const timelineAvailable = await waitForIntroTimeline();
+                if (!timelineAvailable || !introTimeline) {
+                    setOutputPayload({
+                        source: 'intro-camera-debugger',
+                        message: 'Intro timeline is not ready. Click "Run Intro" and try again.'
+                    });
+                    return;
+                }
+
+                const timelineWasPaused = introTimeline.paused();
+                const originalTime = introTimeline.time();
+
+                introTimeline.pause();
+                const snapshots = [];
+
+                for (const beat of introCameraBeatMarkers) {
+                    seekIntroTimeline(beat.time);
+                    snapshots.push(getCameraSnapshot(beat.label));
+                }
+
+                seekIntroTimeline(originalTime);
+                if (!timelineWasPaused) {
+                    introTimeline.play();
+                }
+
+                setOutputPayload({
+                    source: 'intro-camera-debugger',
+                    generatedAt: new Date().toISOString(),
+                    entries: snapshots
+                });
+            };
+
+            if (introRunButton) {
+                introRunButton.addEventListener('click', runIntroForDebug);
+            }
+
+            if (introReplayButton) {
+                introReplayButton.addEventListener('click', () => {
+                    replayIntro();
+                });
+            }
+
+            if (introSkipButton) {
+                introSkipButton.addEventListener('click', () => {
+                    skipIntro();
+                });
+            }
+
+            if (introPlayPauseButton) {
+                introPlayPauseButton.addEventListener('click', () => {
+                    if (!introTimeline) {
+                        runIntroForDebug();
+                        return;
+                    }
+
+                    if (introTimeline.paused()) {
+                        introTimeline.play();
+                    } else {
+                        introTimeline.pause();
+                    }
+                });
+            }
+
+            if (introScrubInput) {
+                introScrubInput.addEventListener('pointerdown', () => {
+                    isScrubbingIntroTimeline = true;
+                });
+
+                introScrubInput.addEventListener('pointerup', () => {
+                    isScrubbingIntroTimeline = false;
+                });
+
+                introScrubInput.addEventListener('input', () => {
+                    const scrubTime = Number.parseFloat(introScrubInput.value);
+                    if (Number.isFinite(scrubTime)) {
+                        seekIntroTimeline(scrubTime);
+                    }
+                });
+
+                introScrubInput.addEventListener('change', () => {
+                    isScrubbingIntroTimeline = false;
+                });
+            }
+
+            if (introBeatButtons) {
+                introCameraBeatMarkers.forEach((beat) => {
+                    const beatButton = document.createElement('button');
+                    beatButton.className = 'dbg-btn';
+                    beatButton.type = 'button';
+                    beatButton.textContent = beat.label;
+                    beatButton.addEventListener('click', () => {
+                        if (!introTimeline) {
+                            runIntroForDebug();
+                            window.setTimeout(() => {
+                                seekIntroTimeline(beat.time);
+                            }, 150);
+                            return;
+                        }
+
+                        seekIntroTimeline(beat.time);
+                    });
+                    introBeatButtons.appendChild(beatButton);
+                });
+            }
+
+            populateShotPresetSelect();
+            loadShotPresetToInputs();
+
+            if (shotPresetSelect) {
+                shotPresetSelect.addEventListener('change', () => {
+                    const shotKey = getActiveShotKey();
+                    loadShotPresetToInputs(shotKey);
+                });
+            }
+
+            if (shotLoadButton) {
+                shotLoadButton.addEventListener('click', () => {
+                    loadShotPresetToInputs();
+                });
+            }
+
+            if (shotPreviewButton) {
+                shotPreviewButton.addEventListener('click', () => {
+                    const shotKey = getActiveShotKey();
+                    if (!shotKey) {
+                        return;
+                    }
+
+                    if (introTimeline && !introTimeline.paused()) {
+                        introTimeline.pause();
+                    }
+
+                    introCameraOverrideActive = true;
+                    applyShotImmediate(shotKey);
+                    setShotStatus(`Preset: ${shotKey} (preview)`);
+                });
+            }
+
+            if (shotApplyButton) {
+                shotApplyButton.addEventListener('click', () => {
+                    applyShotInputsToPreset({ preview: true, source: 'applied' });
+                });
+            }
+
+            if (shotUseCurrentButton) {
+                shotUseCurrentButton.addEventListener('click', () => {
+                    const applied = captureCurrentIntoShotInputs();
+                    if (applied) {
+                        const shotKey = getActiveShotKey();
+                        setShotStatus(`Preset: ${shotKey} (captured current)`);
+                    }
+                });
+            }
+
+            shotEditorInputs.forEach((input) => {
+                input.addEventListener('input', () => {
+                    if (isLoadingShotInputs) {
+                        return;
+                    }
+
+                    applyShotInputsToPreset({ preview: true, source: 'live' });
+                });
+            });
+
+            if (captureCurrentButton) {
+                captureCurrentButton.addEventListener('click', () => {
+                    setOutputPayload({
+                        source: 'intro-camera-debugger',
+                        generatedAt: new Date().toISOString(),
+                        entries: [getCameraSnapshot('current')]
+                    });
+                });
+            }
+
+            if (exportBeatsButton) {
+                exportBeatsButton.addEventListener('click', () => {
+                    void exportBeatSnapshots();
+                });
+            }
+
+            if (copyOutputButton) {
+                copyOutputButton.addEventListener('click', () => {
+                    if (!debugOutput || !debugOutput.value.trim()) {
+                        setOutputPayload({
+                            source: 'intro-camera-debugger',
+                            generatedAt: new Date().toISOString(),
+                            entries: [getCameraSnapshot('current')]
+                        });
+                    }
+
+                    if (!debugOutput || !debugOutput.value.trim()) {
+                        return;
+                    }
+
+                    navigator.clipboard.writeText(debugOutput.value).then(() => {
+                        copyOutputButton.textContent = 'Copied';
+                        window.setTimeout(() => {
+                            copyOutputButton.textContent = 'Copy';
+                        }, 1400);
+                    }).catch(() => {
+                        // Ignore clipboard permission failures.
+                    });
+                });
+            }
+
+            const body = panel.querySelector('#cam-debug-body');
+            const toggle = panel.querySelector('#cam-debug-toggle');
+            if (toggle && body) {
+                toggle.addEventListener('click', () => {
+                    const closed = body.style.display === 'none';
+                    body.style.display = closed ? 'block' : 'none';
+                    toggle.textContent = closed ? '-' : '+';
+                });
+            }
+
+            const updateReadout = () => {
+                const px = panel.querySelector('#dbg-px');
+                const py = panel.querySelector('#dbg-py');
+                const pz = panel.querySelector('#dbg-pz');
+                const tx = panel.querySelector('#dbg-tx');
+                const ty = panel.querySelector('#dbg-ty');
+                const tz = panel.querySelector('#dbg-tz');
+
+                if (px) {
+                    px.textContent = camera.position.x.toFixed(3);
+                }
+                if (py) {
+                    py.textContent = camera.position.y.toFixed(3);
+                }
+                if (pz) {
+                    pz.textContent = camera.position.z.toFixed(3);
+                }
+                if (tx) {
+                    tx.textContent = controls.target.x.toFixed(3);
+                }
+                if (ty) {
+                    ty.textContent = controls.target.y.toFixed(3);
+                }
+                if (tz) {
+                    tz.textContent = controls.target.z.toFixed(3);
+                }
+
+                if (introTimeline) {
+                    const timelineDuration = Number.isFinite(introTimeline.duration())
+                        ? introTimeline.duration()
+                        : 20;
+                    const timelineTime = introTimeline.time();
+
+                    if (introScrubInput) {
+                        introScrubInput.max = timelineDuration.toFixed(2);
+                        if (!isScrubbingIntroTimeline) {
+                            introScrubInput.value = timelineTime.toFixed(2);
+                        }
+                    }
+
+                    if (introStatusLabel) {
+                        const timelineState = introTimeline.paused() ? 'paused' : 'playing';
+                        introStatusLabel.textContent = `t=${timelineTime.toFixed(2)}s / ${timelineDuration.toFixed(2)}s · ${timelineState}`;
+                    }
+
+                    if (introPlayPauseButton) {
+                        introPlayPauseButton.textContent = introTimeline.paused() ? 'Play' : 'Pause';
+                    }
+                } else {
+                    if (introStatusLabel) {
+                        introStatusLabel.textContent = introActive
+                            ? 't=0.00s · preparing'
+                            : 't=0.00s · idle';
+                    }
+
+                    if (introPlayPauseButton) {
+                        introPlayPauseButton.textContent = 'Play';
+                    }
+                }
+
+                window.requestAnimationFrame(updateReadout);
+            };
+
+            window.requestAnimationFrame(updateReadout);
+        }
+
+        function applyObject51BloomGlow(root) {
+            if (!root) {
+                return 0;
+            }
+
+            const targetKey = bloomGlowTargetMeshName.toLowerCase();
+            let appliedCount = 0;
+
+            const applyGlowToMaterial = (sourceMaterial) => {
+                if (!sourceMaterial || typeof sourceMaterial.clone !== 'function') {
+                    return sourceMaterial;
+                }
+
+                const glowMaterial = sourceMaterial.clone();
+                if (!glowMaterial.emissive || typeof glowMaterial.emissive.setHex !== 'function') {
+                    return glowMaterial;
+                }
+
+                glowMaterial.emissive.setHex(bloomGlowEmissiveColor);
+                glowMaterial.emissiveIntensity = bloomGlowEmissiveIntensity;
+                glowMaterial.needsUpdate = true;
+                return glowMaterial;
+            };
+
+            root.traverse((node) => {
+                if (!node || !node.isMesh || !node.name) {
+                    return;
+                }
+
+                if (!node.name.toLowerCase().includes(targetKey)) {
+                    return;
+                }
+
+                if (Array.isArray(node.material)) {
+                    node.material = node.material.map((material) => applyGlowToMaterial(material));
+                } else {
+                    node.material = applyGlowToMaterial(node.material);
+                }
+
+                appliedCount += 1;
+            });
+
+            return appliedCount;
         }
 
         function cacheModelMaterialStates(root) {
@@ -1186,6 +3852,7 @@
                 pointLight.shadow.mapSize.set(1024, 1024);
                 pointLight.shadow.bias = -0.0002;
                 pointLight.shadow.normalBias = 0.01;
+                registerIntroLight(pointLight, options.intensity, 'neon');
                 neonRigGroup.add(pointLight);
 
                 const tubeMaterial = new THREE.MeshStandardMaterial({
@@ -1242,6 +3909,7 @@
                 const fillPoint = new THREE.PointLight(options.color, options.intensity, options.distance, 2);
                 fillPoint.position.set(0, 0, 0);
                 fillPoint.castShadow = false;
+                registerIntroLight(fillPoint, options.intensity, 'neon');
                 fixtureGroup.add(fillPoint);
 
                 const downSpot = new THREE.SpotLight(
@@ -1254,6 +3922,7 @@
                 );
                 downSpot.position.set(0, 0.15, 0);
                 downSpot.castShadow = false;
+                registerIntroLight(downSpot, options.intensity * 0.48, 'neon');
                 fixtureGroup.add(downSpot);
 
                 const downTarget = new THREE.Object3D();
@@ -1308,7 +3977,7 @@
         }
 
         function updateCyberpunkNeonRig(elapsedTime) {
-            if (!neonFlickerLights.length) {
+            if (!neonFlickerEnabled || !neonFlickerLights.length) {
                 return;
             }
 
@@ -1421,6 +4090,7 @@
         }
 
         function updateNeonDebuggerInputs() {
+            return;
             const targetSelect = document.getElementById('neon-target');
             const inputX = document.getElementById('neon-x');
             const inputY = document.getElementById('neon-y');
@@ -1502,6 +4172,7 @@
         }
 
         function setupNeonDebuggerControls() {
+            return;
             if (neonDebuggerReady) {
                 return;
             }
@@ -1600,6 +4271,7 @@
         }
 
         function updateDetailHotspotDebuggerInputs() {
+            return;
             const targetSelect = document.getElementById('point-target');
             const inputX = document.getElementById('point-x');
             const inputY = document.getElementById('point-y');
@@ -1656,6 +4328,7 @@
         }
 
         function setupDetailHotspotDebuggerControls() {
+            return;
             if (detailHotspotDebuggerReady) {
                 return;
             }
@@ -1830,24 +4503,7 @@
         }
 
         function setupDebugPanelToggle() {
-            const debugPanel = document.getElementById('debug-info');
-            if (!debugPanel) {
-                return;
-            }
-
-            window.addEventListener('keydown', (event) => {
-                const targetTag = event.target && event.target.tagName;
-                if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
-                    return;
-                }
-
-                if (event.key !== 'h' && event.key !== 'H') {
-                    return;
-                }
-
-                event.preventDefault();
-                debugPanel.style.display = debugPanel.style.display === 'none' ? 'block' : 'none';
-            });
+            removeElementById('debug-info');
         }
 
         function isMobileDeviceExperience() {
@@ -2140,7 +4796,7 @@
 
             cameraInteriorTransitionTween = gsap.to(state, {
                 duration: interiorCameraTransitionDuration,
-                ease: 'power2.inOut',
+                ease: cinematicCameraEase,
                 px: targetPosition.x,
                 py: targetPosition.y,
                 pz: targetPosition.z,
@@ -2259,7 +4915,7 @@
             return shiftCameraInsideCar(animate);
         }
 
-        function resetInteriorCameraMode(animate = true) {
+        function resetInteriorCameraMode(animate = true, restoreReturnCamera = true) {
             if (!interiorCameraActive) {
                 return false;
             }
@@ -2297,7 +4953,7 @@
                 refreshModelTimeline();
             }
 
-            const restored = interiorReturnSnapshotReady
+            const restored = (interiorReturnSnapshotReady && restoreReturnCamera)
                 ? transitionCameraTo(interiorCameraReturnPosition, interiorCameraReturnTarget, animate)
                 : false;
 
@@ -2943,7 +5599,11 @@
             }
 
             applyEnvironmentPreset();
-            applyMaterialSurfaceLook(defaultEnvironmentIntensityScale, defaultMinimumRoughness, true);
+            if (introLightRevealCompleted) {
+                applyMaterialSurfaceLook(defaultEnvironmentIntensityScale, defaultMinimumRoughness, true);
+            } else {
+                turnOffAllIntroLights();
+            }
             requestShadowUpdate();
         }
 
@@ -3069,20 +5729,6 @@
             });
 
             meshRows.sort((a, b) => b.triangles - a.triangles);
-
-            console.groupCollapsed('Porsche GLB deep analysis');
-            console.log('Summary', {
-                nodeCount,
-                meshCount,
-                skinnedMeshCount,
-                boneCount,
-                materialCount: materialIds.size,
-                triangleCount: Math.round(triangleCount),
-                animationCount: Array.isArray(gltf && gltf.animations) ? gltf.animations.length : 0
-            });
-            console.table(meshRows.slice(0, 20));
-            console.table(namedRows.slice(0, 80));
-            console.groupEnd();
         }
 
         function analyzeAndRigDoors(root) {
@@ -3620,24 +6266,6 @@
                         sizeZ: Number(candidate.size.z.toFixed(2))
                     });
                 }
-
-                console.groupCollapsed('Porsche GLB door analysis');
-                console.log('Door summary', {
-                    candidateCount: candidates.length,
-                    manualGroupRiggedCount,
-                    autoRiggedDoorCount: Math.max(0, doorRigs.length - manualGroupRiggedCount),
-                    riggedDoorCount: doorRigs.length
-                });
-                console.table(doorAnalysisRows);
-                console.table(doorRigs.map((door) => ({
-                    name: door.name,
-                    side: door.side,
-                    segment: door.segment,
-                    source: door.source,
-                    closedRotationY: Number(door.closedRotationY.toFixed(3)),
-                    openRotationY: Number(door.openRotationY.toFixed(3))
-                })));
-                console.groupEnd();
             }
 
             setDoorPivotMarkerVisibility(doorPivotMarkersVisible);
@@ -3751,6 +6379,7 @@
         }
 
         function updateDoorDebugInfo() {
+            return;
             const doorDebugEl = document.getElementById('door-debug');
             if (!doorDebugEl) {
                 return;
@@ -3902,6 +6531,10 @@
             window.addEventListener('keydown', (event) => {
                 const targetTag = event.target && event.target.tagName;
                 if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
+                    return;
+                }
+
+                if (introActive) {
                     return;
                 }
 
@@ -4264,6 +6897,38 @@
             return true;
         }
 
+        function resetVehicleStateForTakeControl() {
+            wheelAutoSpin = false;
+            wheelSpinSpeed = 0;
+            pendingWheelGestureRotation = 0;
+            smoothedScrollWheelDelta = 0;
+
+            for (const wheel of wheelRigs) {
+                const rollTarget = wheel.rollGroup || wheel.pivot;
+                if (rollTarget) {
+                    rollTarget.rotation.set(0, 0, 0);
+                }
+            }
+
+            steerLeftPressed = false;
+            steerRightPressed = false;
+            steeringTargetAngle = 0;
+            steeringAngle = 0;
+            applyFrontWheelSteering(0);
+
+            setDoorOpenState(false);
+            for (const door of doorRigs) {
+                door.targetRotationY = door.closedRotationY;
+                door.currentRotationY = door.closedRotationY;
+                const rotationTarget = door.pivot || door.node;
+                if (rotationTarget) {
+                    rotationTarget.rotation.y = door.closedRotationY;
+                }
+            }
+
+            requestShadowUpdate();
+        }
+
         function updateScrollDrivenWheelRotation(deltaTime) {
             const currentScrollTop = scrollContainer.scrollTop || 0;
             const rawScrollDelta = currentScrollTop - lastScrollTop;
@@ -4453,6 +7118,7 @@
         }
 
         function updateCaliperDebugInfo() {
+            return;
             const caliperDebugEl = document.getElementById('caliper-debug');
             if (!caliperDebugEl) {
                 return;
@@ -4573,32 +7239,66 @@
                     engineMasterGainNode.connect(engineAudioContext.destination);
                 }
 
-                const [startResponse, loopResponse, revResponse] = await Promise.all([
-                    fetch(engineStartAudioPath),
-                    fetch(engineLoopAudioPath),
-                    fetch(engineRevAudioPath)
-                ]);
-
-                if (!startResponse.ok || !loopResponse.ok || !revResponse.ok) {
-                    throw new Error('One or more engine audio files failed to load.');
+                let preloadedBuffers = engineAudioPreloadedBuffers;
+                if (!preloadedBuffers && engineAudioPreloadPromise) {
+                    await engineAudioPreloadPromise;
+                    preloadedBuffers = engineAudioPreloadedBuffers;
                 }
 
-                const [startArrayBuffer, loopArrayBuffer, revArrayBuffer] = await Promise.all([
-                    startResponse.arrayBuffer(),
-                    loopResponse.arrayBuffer(),
-                    revResponse.arrayBuffer()
-                ]);
+                const decodeEngineAudioBuffers = async (bufferSet) => {
+                    if (!bufferSet) {
+                        throw new Error('Missing engine audio buffers.');
+                    }
 
-                const [decodedStartBuffer, decodedLoopBuffer, decodedRevBuffer] = await Promise.all([
-                    engineAudioContext.decodeAudioData(startArrayBuffer.slice(0)),
-                    engineAudioContext.decodeAudioData(loopArrayBuffer.slice(0)),
-                    engineAudioContext.decodeAudioData(revArrayBuffer.slice(0))
-                ]);
+                    const startArrayBuffer = bufferSet.startArrayBuffer;
+                    const loopArrayBuffer = bufferSet.loopArrayBuffer;
+                    const revArrayBuffer = bufferSet.revArrayBuffer;
 
-                engineStartBuffer = decodedStartBuffer;
-                engineLoopBuffer = decodedLoopBuffer;
-                engineRevBuffer = decodedRevBuffer;
+                    if (
+                        !(startArrayBuffer instanceof ArrayBuffer)
+                        || !(loopArrayBuffer instanceof ArrayBuffer)
+                        || !(revArrayBuffer instanceof ArrayBuffer)
+                        || startArrayBuffer.byteLength === 0
+                        || loopArrayBuffer.byteLength === 0
+                        || revArrayBuffer.byteLength === 0
+                    ) {
+                        throw new Error('Engine audio buffers are empty or invalid.');
+                    }
+
+                    const [decodedStartBuffer, decodedLoopBuffer, decodedRevBuffer] = await Promise.all([
+                        engineAudioContext.decodeAudioData(startArrayBuffer.slice(0)),
+                        engineAudioContext.decodeAudioData(loopArrayBuffer.slice(0)),
+                        engineAudioContext.decodeAudioData(revArrayBuffer.slice(0))
+                    ]);
+
+                    return {
+                        decodedStartBuffer,
+                        decodedLoopBuffer,
+                        decodedRevBuffer
+                    };
+                };
+
+                if (!preloadedBuffers) {
+                    preloadedBuffers = await fetchEngineAudioArrayBuffers({ cache: 'force-cache' });
+                }
+
+                let decodedBuffers;
+                try {
+                    decodedBuffers = await decodeEngineAudioBuffers(preloadedBuffers);
+                } catch (error) {
+                    console.warn('Engine audio decode failed from warmup/cached buffers. Retrying with fresh fetch.', error);
+
+                    engineAudioPreloadedBuffers = null;
+                    await clearEngineAudioPersistentCache();
+                    const freshBuffers = await fetchEngineAudioArrayBuffers({ cache: 'no-store' });
+                    decodedBuffers = await decodeEngineAudioBuffers(freshBuffers);
+                }
+
+                engineStartBuffer = decodedBuffers.decodedStartBuffer;
+                engineLoopBuffer = decodedBuffers.decodedLoopBuffer;
+                engineRevBuffer = decodedBuffers.decodedRevBuffer;
                 engineAudioReady = true;
+                engineAudioPreloadedBuffers = null;
             })();
 
             try {
@@ -4627,7 +7327,7 @@
             engineStartRequiredPopupEl.style.transform = 'translateX(-50%) translateY(10px)';
         }
 
-        function showEngineStartRequiredPopup() {
+        function showEngineStartRequiredPopup(message = engineStartRequiredMessage) {
             const nowMs = performance.now();
             if (nowMs - engineStartRequiredPopupLastShownAt < engineStartRequiredPopupCooldownMs) {
                 return;
@@ -4657,7 +7357,7 @@
                 engineStartRequiredPopupEl = popup;
             }
 
-            engineStartRequiredPopupEl.textContent = engineStartRequiredMessage;
+            engineStartRequiredPopupEl.textContent = message;
             engineStartRequiredPopupEl.style.opacity = '1';
             engineStartRequiredPopupEl.style.transform = 'translateX(-50%) translateY(0)';
 
@@ -4678,7 +7378,113 @@
                 return;
             }
 
-            void triggerEngineRevFromScroll(revInputStrength);
+            const scrollStrength = Math.abs(revInputStrength);
+            if (scrollStrength < engineRevScrollDeltaThreshold) {
+                return;
+            }
+
+            const strengthNormalized = THREE.MathUtils.clamp(
+                scrollStrength / Math.max(1, wheelGestureDeltaClamp),
+                0,
+                1
+            );
+            const pulseTarget = THREE.MathUtils.clamp(
+                engineRevPulseStrengthMin + (strengthNormalized * engineRevPulseStrengthRange),
+                0,
+                1
+            );
+
+            engineRevPulseStrengthNormalized = Math.max(
+                engineRevPulseStrengthNormalized * 0.72,
+                pulseTarget
+            );
+            engineRevPulseActiveUntilMs = performance.now() + engineRevPulseHoldMs;
+        }
+
+        function startEngineRevHold() {
+            if (!engineRunning) {
+                showEngineStartRequiredPopup();
+                return false;
+            }
+
+            if (!engineRevHoldActive) {
+                engineRevHoldStrengthNormalized = THREE.MathUtils.clamp(
+                    engineRevHoldStrengthMin + (Math.random() * engineRevHoldStrengthRange),
+                    0,
+                    1
+                );
+            }
+
+            engineRevHoldActive = true;
+            return true;
+        }
+
+        function stopEngineRevHold() {
+            if (!engineRevHoldActive) {
+                return;
+            }
+
+            engineRevHoldActive = false;
+            engineRevPulseStrengthNormalized = Math.max(
+                engineRevPulseStrengthNormalized,
+                engineRevHoldStrengthNormalized * 0.9
+            );
+            engineRevPulseActiveUntilMs = Math.max(
+                engineRevPulseActiveUntilMs,
+                performance.now() + engineRevPulseHoldMs
+            );
+        }
+
+        function resetEngineRevDynamicsState() {
+            engineRevCurrentNormalized = 0;
+            engineRevTargetNormalized = 0;
+            engineRevHoldActive = false;
+            engineRevHoldStrengthNormalized = 0;
+            engineRevPulseStrengthNormalized = 0;
+            engineRevPulseActiveUntilMs = 0;
+        }
+
+        function getEngineLoopPlaybackRateFromNormalizedRev(revNormalized) {
+            const clampedRev = THREE.MathUtils.clamp(revNormalized, 0, 1);
+            return THREE.MathUtils.lerp(engineLoopPlaybackRateIdle, engineLoopPlaybackRateMax, clampedRev);
+        }
+
+        function updateEngineRevDynamics(deltaTime) {
+            if (!engineRunning || !engineLoopSourceNode || !engineAudioContext) {
+                if (!engineRunning) {
+                    resetEngineRevDynamicsState();
+                }
+                return;
+            }
+
+            const nowMs = performance.now();
+            let nextRevTarget = 0;
+
+            if (engineRevHoldActive) {
+                nextRevTarget = Math.max(nextRevTarget, engineRevHoldStrengthNormalized);
+            }
+
+            if (nowMs < engineRevPulseActiveUntilMs) {
+                nextRevTarget = Math.max(nextRevTarget, engineRevPulseStrengthNormalized);
+            } else {
+                engineRevPulseStrengthNormalized = 0;
+            }
+
+            engineRevTargetNormalized = nextRevTarget;
+
+            const rising = engineRevTargetNormalized > engineRevCurrentNormalized;
+            const timeConstant = rising ? engineRevRiseTimeConstant : engineRevFallTimeConstant;
+            const safeTime = Math.max(0.001, Number(deltaTime) || 0);
+            const blend = 1 - Math.exp(-safeTime / Math.max(0.001, timeConstant));
+            engineRevCurrentNormalized = THREE.MathUtils.lerp(engineRevCurrentNormalized, engineRevTargetNormalized, blend);
+
+            if (Math.abs(engineRevTargetNormalized - engineRevCurrentNormalized) < 0.0005) {
+                engineRevCurrentNormalized = engineRevTargetNormalized;
+            }
+
+            const playbackRate = getEngineLoopPlaybackRateFromNormalizedRev(engineRevCurrentNormalized);
+            const now = engineAudioContext.currentTime;
+            engineLoopSourceNode.playbackRate.setTargetAtTime(playbackRate, now, timeConstant);
         }
 
         function stopAndDisconnectSourceNode(sourceNode) {
@@ -4877,6 +7683,7 @@
 
             engineRunning = false;
             engineStartSequenceId += 1;
+            resetEngineRevDynamicsState();
 
             stopEngineRevSource();
             stopEngineSources();
@@ -4904,6 +7711,8 @@
                 if (sequenceId === engineStartSequenceId) {
                     engineRunning = false;
                 }
+
+                showEngineStartRequiredPopup(engineAudioLoadingMessage);
                 return;
             }
 
@@ -4928,6 +7737,7 @@
             }
 
             stopEngineSources();
+            resetEngineRevDynamicsState();
 
             const now = engineAudioContext.currentTime + 0.01;
             const startSource = engineAudioContext.createBufferSource();
@@ -4941,6 +7751,7 @@
             const loopSource = engineAudioContext.createBufferSource();
             loopSource.buffer = engineLoopBuffer;
             loopSource.loop = true;
+            loopSource.playbackRate.setValueAtTime(getEngineLoopPlaybackRateFromNormalizedRev(0), now);
 
             const loopDuration = Math.max(0.05, engineLoopBuffer.duration);
             const trimStart = Math.min(engineLoopTrimStart, loopDuration * 0.2);
@@ -4955,14 +7766,6 @@
             loopSource.connect(loopGainNode);
             loopGainNode.connect(engineMasterGainNode);
 
-            const overlap = Math.max(0, Math.min(engineStartToLoopOverlapSeconds, engineStartBuffer.duration * 0.25));
-            const loopStartAt = now + Math.max(0, engineStartBuffer.duration - overlap);
-
-            if (overlap > 0) {
-                startGainNode.gain.setValueAtTime(engineStartAudioVolume, loopStartAt - overlap);
-                startGainNode.gain.linearRampToValueAtTime(0, loopStartAt);
-            }
-
             startSource.onended = () => {
                 try {
                     startSource.disconnect();
@@ -4973,6 +7776,19 @@
 
                 if (engineStartSourceNode === startSource) {
                     engineStartSourceNode = null;
+                }
+
+                if (sequenceId !== engineStartSequenceId || !engineRunning || !engineLoopSourceNode) {
+                    return;
+                }
+
+                try {
+                    loopSource.start(engineAudioContext.currentTime + 0.005, loopStart);
+                } catch (error) {
+                    if (sequenceId === engineStartSequenceId) {
+                        engineRunning = false;
+                    }
+                    stopEngineSources();
                 }
             };
 
@@ -4994,7 +7810,6 @@
 
             try {
                 startSource.start(now);
-                loopSource.start(loopStartAt, loopStart);
             } catch (error) {
                 if (sequenceId === engineStartSequenceId) {
                     engineRunning = false;
@@ -5027,6 +7842,10 @@
                     return;
                 }
 
+                if (introActive) {
+                    return;
+                }
+
                 if (event.key !== 's' && event.key !== 'S') {
                     return;
                 }
@@ -5052,6 +7871,10 @@
             wheelControlsReady = true;
 
             scrollContainer.addEventListener('wheel', (event) => {
+                if (introActive) {
+                    return;
+                }
+
                 const clampedGestureDelta = THREE.MathUtils.clamp(
                     event.deltaY,
                     -wheelGestureDeltaClamp,
@@ -5077,9 +7900,15 @@
                     return;
                 }
 
+                if (introActive) {
+                    return;
+                }
+
                 if (event.code === 'Space' || event.key === 'm' || event.key === 'M') {
                     event.preventDefault();
-                    triggerRevFromUserInput(wheelGestureDeltaClamp);
+                    if (!event.repeat) {
+                        startEngineRevHold();
+                    }
                     return;
                 }
 
@@ -5105,6 +7934,16 @@
 
                 event.preventDefault();
             });
+
+            window.addEventListener('keyup', (event) => {
+                if (introActive) {
+                    return;
+                }
+
+                if (event.code === 'Space' || event.key === 'm' || event.key === 'M') {
+                    stopEngineRevHold();
+                }
+            });
         }
 
         function setupWheelSteeringControls() {
@@ -5117,6 +7956,10 @@
             window.addEventListener('keydown', (event) => {
                 const targetTag = event.target && event.target.tagName;
                 if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') {
+                    return;
+                }
+
+                if (introActive) {
                     return;
                 }
 
@@ -5555,6 +8398,7 @@
         }
 
         function updateKeyframeEditorInputs() {
+            return;
             const modelSectionEl = document.getElementById('model-section');
             if (modelSectionEl) {
                 modelSectionEl.textContent = `${activeSectionIndex + 1} / ${sections.length}`;
@@ -5592,6 +8436,7 @@
         }
 
         function setupKeyframeEditorControls() {
+            return;
             if (keyframeEditorReady) {
                 return;
             }
